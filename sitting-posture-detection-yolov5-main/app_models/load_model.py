@@ -1,8 +1,9 @@
 import math
 from ultralytics import YOLO
 
+
 class Model:
-    def __init__(self, model_name="yolov8n-pose.pt"):
+    def __init__(self, model_name="yolov8n-pose.pt"): 
         self.model_name = model_name
         print('Loading YOLOv8 Pose model...')
         self.model = YOLO(self.model_name) 
