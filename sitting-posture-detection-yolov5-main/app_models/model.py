@@ -1,6 +1,5 @@
 import cv2
 
-from app_controllers.utils import camera_helper
 from app_models.load_model import Model
 
 
