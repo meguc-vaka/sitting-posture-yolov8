@@ -1,98 +1,211 @@
 <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>AI 坐姿即時監測</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 坐姿偵測系統</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <style>
-        body {
-            background-color: #323844;
-            color: white;
-            font-family: 'Segoe UI', Arial, sans-serif;
-            text-align: center;
+        body { 
+            text-align: center; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+
+            background-color: #33404d;
+            background-size: cover;
+            background-repeat: no-repeat;
+            background-position: center center;
+            background-attachment: fixed;
+            color: white; 
+            margin: 0;
             padding: 20px;
         }
-        .container {
-            max-width: 800px;
-            margin: auto;
-        }
-        h1 { font-weight: bold; margin-bottom: 30px; }
         
-        /* 下拉選單與按鈕樣式 */
-        select, button {
-            padding: 8px 15px;
-            border-radius: 4px;
-            border: 1px solid #4A5568;
+        h1 { 
+            color: #ecf0f1; 
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+        }
+        
+        .status { 
+            margin-bottom: 15px; 
+            color: #f1c40f; 
             font-weight: bold;
-            margin: 0 5px;
+            font-size: 1.1em;
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.8);
         }
-        select { background-color: white; color: #333; }
-        #startBtn { background-color: #4CAF50; color: white; cursor: pointer; }
-        #stopBtn { background-color: #E53E3E; color: white; cursor: pointer; }
+
+        /* === 控制面板樣式 === */
+        .controls {
+            margin-bottom: 20px;
+            background-color: rgba(0, 0, 0, 0.6);
+            display: inline-block;
+            padding: 15px 25px;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        }
+
+        select, button {
+            font-size: 16px;
+            padding: 8px 12px;
+            margin: 0 5px;
+            border-radius: 5px;
+            border: none;
+            cursor: pointer;
+        }
+
+        select { background-color: #ecf0f1; color: #2c3e50; }
         
-        /* 影像外框 */
-        .video-box {
-            margin: 20px auto;
-            border: 3px solid #4A5568;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-            background-color: #000;
+        button#startBtn { background-color: #2ecc71; color: white; font-weight: bold; }
+        button#startBtn:hover { background-color: #27ae60; }
+        
+        button#stopBtn { background-color: #e74c3c; color: white; font-weight: bold; }
+        button#stopBtn:hover { background-color: #c0392b; }
+
+        /* 隱藏原始鏡頭畫面 */
+        #videoElement, #canvasElement { display: none; } 
+        
+        #processedImage { 
+            max-width: 100%; 
+            max-height: 70vh;
+            border: 4px solid rgba(255, 255, 255, 0.3); 
+            border-radius: 12px; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+            background-color: rgba(0, 0, 0, 0.5);
         }
     </style>
 </head>
 <body>
+    <h1>AI 即時坐姿偵測系統</h1>
+    <div class="status" id="statusText">系統已就緒，請選擇相機並按下開啟</div>
 
-<div class="container">
-    <h1>AI 坐姿即時監測</h1>
-    
-    <div style="margin-bottom: 30px;">
-        <label>選擇相機：</label>
+    <div class="controls">
         <select id="cameraSelect">
-            {% for name, id in cameras.items() %}
-                <option value="{{ id }}">{{ name }}</option>
-            {% endfor %}
+            <option value="">正在載入相機列表...</option>
         </select>
-        <button id="startBtn">開始監測</button>
-        <button id="stopBtn">暫停</button>
+        <button id="startBtn">開啟相機</button>
+        <button id="stopBtn">停止</button>
     </div>
 
-    <div class="video-box" style="position: relative; width: 730px; height: 550px;">
-        <img id="videoStream" src="" width="730" height="550" style="display: none; object-fit: contain;">
-        
-        <div id="placeholder" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: #777; font-size: 1.2rem;">
-            📷 攝影機已關閉，請點擊開始監測
-        </div>
-    </div>
-    
-    <p style="color: #A0AEC0; font-size: 0.9rem;">Model: {{ model_name }} | Version: 2026.03</p>
-</div>
+    <video id="videoElement" autoplay playsinline></video>
+    <canvas id="canvasElement"></canvas>
 
-<script>
-    const startBtn = document.getElementById('startBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const videoImg = document.getElementById('videoStream');
-    const placeholder = document.getElementById('placeholder');
-    const cameraSelect = document.getElementById('cameraSelect');
+    <img id="processedImage" src="" alt="等待影像流...">
 
-    startBtn.onclick = function() {
-        const id = cameraSelect.value;
-        console.log("嘗試開啟相機 ID:", id);
+    <script>
+        const video = document.getElementById('videoElement');
+        const canvas = document.getElementById('canvasElement');
+        const context = canvas.getContext('2d');
+        const processedImage = document.getElementById('processedImage');
+        const statusText = document.getElementById('statusText');
+        const cameraSelect = document.getElementById('cameraSelect');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
 
-        videoImg.style.display = "block";
-        placeholder.style.display = "none";
+        const socket = io();
+        let stream = null;        // 儲存目前的攝影機串流
+        let sendInterval = null;  // 儲存定時發送影像的計時器
 
-        // 設定 src 並加上時間戳記防止快取 (Cache Buster)
-        // 這樣瀏覽器才會真正去重新請求 /video_feed
-        videoImg.src = "/video_feed/" + id + "?t=" + new Date().getTime();
-    };
+        socket.on('connect', () => {
+            console.log("已連線至伺服器");
+        });
 
-    stopBtn.onclick = function() {
-        // 停止串流
-        videoImg.src = ""; 
-        videoImg.style.display = "none";
-        placeholder.style.display = "flex";
-    };
-</script>
+        // 1. 取得所有可用的攝影機列表並放入下拉選單
+        async function getCameras() {
+            try {
+                // 先請求一次權限，這樣瀏覽器才抓得到相機的真實名稱
+                await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+                    .then(s => s.getTracks().forEach(t => t.stop())); 
 
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                
+                cameraSelect.innerHTML = '';
+                if (videoDevices.length === 0) {
+                    cameraSelect.innerHTML = '<option value="">找不到相機</option>';
+                    return;
+                }
+                
+                videoDevices.forEach((device, index) => {
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    option.text = device.label || `相機 ${index + 1}`;
+                    cameraSelect.appendChild(option);
+                });
+            } catch (err) {
+                console.error("無法取得相機列表:", err);
+                cameraSelect.innerHTML = '<option value="">請先允許相機權限</option>';
+            }
+        }
+
+        // 網頁載入時立刻抓取相機列表
+        getCameras();
+
+        // 2. 開啟相機功能
+        startBtn.addEventListener('click', () => {
+            const deviceId = cameraSelect.value;
+            if (!deviceId) return;
+
+            // 如果已經有開著的相機，先關掉
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+
+            statusText.innerText = "正在連線攝影機...";
+            statusText.style.color = "#f1c40f";
+
+            // 請求開啟指定的相機
+            navigator.mediaDevices.getUserMedia({ 
+                video: { deviceId: { exact: deviceId }, width: 640, height: 480 } 
+            })
+            .then(function(newStream) {
+                stream = newStream;
+                video.srcObject = stream;
+                statusText.innerText = "系統運作中，辨識中...";
+                statusText.style.color = "#2ecc71";
+                
+                video.onplay = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    
+                    // 清除舊的計時器
+                    if (sendInterval) clearInterval(sendInterval);
+                    
+                    // 開始每秒傳送 10 次畫面給後端
+                    sendInterval = setInterval(() => {
+                        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        const dataURL = canvas.toDataURL('image/jpeg', 0.5);
+                        socket.emit('video_frame', dataURL);
+                    }, 100);
+                };
+            })
+            .catch(function(err) {
+                console.error("攝影機開啟失敗: ", err);
+                statusText.innerText = "無法存取攝影機！";
+                statusText.style.color = "#e74c3c";
+            });
+        });
+
+        // 3. 停止相機功能
+        stopBtn.addEventListener('click', () => {
+            if (stream) {
+                // 停止所有相機軌道 (鏡頭燈會熄滅)
+                stream.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+            }
+            if (sendInterval) {
+                // 停止傳送影像給後端
+                clearInterval(sendInterval);
+                sendInterval = null;
+            }
+            statusText.innerText = "已停止偵測";
+            statusText.style.color = "#f1c40f";
+            processedImage.src = ""; // 清除畫面
+        });
+
+        // 接收後端傳回來的畫面
+        socket.on('processed_frame', function(data) {
+            processedImage.src = data;
+        });
+    </script>
 </body>
 </html>
