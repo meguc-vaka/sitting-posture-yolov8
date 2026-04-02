@@ -1,61 +1,66 @@
 import cv2
-from flask import Flask, render_template, Response
+import numpy as np
+import base64
+from flask import Flask, render_template
+from flask_socketio import SocketIO, emit
+
 from app_models.load_model import Model
-from app_controllers.utils import camera_helper
 from app_controllers.controller import Controller
 
 app = Flask(__name__)
-model = Model("yolov8n-pose.pt")
+# 啟用 SocketIO，允許跨域請求
+socketio = SocketIO(app, cors_allowed_origins="*")
 
-# 影像產生器
-def generate_frames(camera_id):
-    cap = cv2.VideoCapture(int(camera_id))
-    
-    while True:
-        success, frame = cap.read()
-        if not success:
-            break
-        
-        # --- AI 辨識核心對接 ---
-        try:
-            # 把畫面交給 Model 進行預測
-            results = model.predict(frame)
-            
-            # 呼叫 Model 的 get_results 來取得座標與算好的角度
-            keypoints_dict, angle = model.get_results(results)
-            
-            # 如果算成功了，就把這些數據交給 Controller
-            if keypoints_dict is not None and angle is not None:
-                is_good_posture = angle >= 150
-                Controller.draw_skeleton_and_angle(frame, keypoints_dict, angle, is_good_posture)
-                
-        except Exception as e:
-            print(f"AI 偵測發生錯誤: {e}")
+# 在程式啟動時就先載入模型，避免每次連線都重新讀取，提升效能
+print("正在初始化 AI 模型...")
+pose_model = Model("yolov8n-pose.pt")
 
-        # 把畫好骨架的 frame 上傳給網頁
-        ret, buffer = cv2.imencode('.jpg', frame)
-        if not ret:
-            continue
-            
-        frame_bytes = buffer.tobytes()
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-    
-    cap.release()
-
-# 網頁主頁面
 @app.route('/')
 def index():
-    # 呼叫 camera_helper 取得清單
-    cameras = camera_helper.get_camera_mapping()
-    return render_template('index.html', cameras=cameras)
+    # 這裡會去專案資料夾下的 templates 資料夾中尋找 index.html 顯示給使用者
+    return render_template('index.html')
 
-# 4影像串流路由
-@app.route('/video_feed/<int:cam_id>')
-def video_feed(cam_id):
-    print(f"--- 收到連線請求，準備開啟相機 ID: {cam_id} ---")
-    return Response(generate_frames(cam_id), 
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
+# 建立一個 WebSocket 接收通道，名稱叫做 'video_frame'
+@socketio.on('video_frame')
+def handle_frame(data):
+    try:
+        # ==========================================
+        # 步驟一：接收前端傳來的圖片並「解碼」成 OpenCV 格式
+        # ==========================================
+        # 前端傳來的是 Base64 字串 (例如 data:image/jpeg;base64,/9j/4AAQ...)
+        # 我們需要把逗號後面的純資料切出來
+        encoded_data = data.split(',')[1]
+        # 解碼成二進位資料
+        nparr = np.frombuffer(base64.b64decode(encoded_data), np.uint8)
+        # 轉換成 OpenCV 看得懂的圖片陣列 (frame)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000, debug=True)
+        # ==========================================
+        # 步驟二：交給您的 Model 算數字，交給 Controller 畫圖
+        # ==========================================
+        results = pose_model.predict(frame)
+        keypoints_dict, angle = pose_model.get_results(results)
+        
+        if keypoints_dict is not None and angle is not None:
+            is_good_posture = angle >= 150
+            # 這裡就是我們剛才完美綁定了邊框與骨架的那個函式！
+            Controller.draw_skeleton_and_angle(frame, keypoints_dict, angle, is_good_posture)
+
+        # ==========================================
+        # 步驟三：把畫好骨架的圖片「編碼」回字串，丟回給前端網頁
+        # ==========================================
+        # 將處理後的 frame 壓縮成 JPG
+        ret, buffer = cv2.imencode('.jpg', frame)
+        if ret:
+            # 再轉回 Base64 字串
+            encoded_img = base64.b64encode(buffer).decode('utf-8')
+            # 透過 WebSocket 傳回給前端，通道名稱叫做 'processed_frame'
+            emit('processed_frame', f"data:image/jpeg;base64,{encoded_img}")
+
+    except Exception as e:
+        print(f"處理影像時發生錯誤: {e}")
+
+if __name__ == '__main__':
+    # 雲端版必須使用 socketio.run 來啟動伺服器，取代原本的 app.run
+    print("伺服器啟動中... 請前往 http://127.0.0.1:5000")
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
