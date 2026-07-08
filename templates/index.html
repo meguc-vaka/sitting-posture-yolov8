@@ -312,26 +312,18 @@
 </div>
 
 <script>
-    // 新增：久坐計時器變數
-    let sedentaryTimer = null;
-    const SEDENTARY_TIME_MS = 90 * 60 * 1000;
-
-    const startBtn = document.getElementById('startBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const videoImg = document.getElementById('videoStream');
-    const placeholder = document.getElementById('placeholder');
-    const cameraSelect = document.getElementById('cameraSelect');
-
-    startBtn.onclick = function() {
-        
     // 宣告元素變數與計時器變數
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
     const videoImg = document.getElementById('videoStream');
     const placeholder = document.getElementById('placeholder');
     const cameraSelect = document.getElementById('cameraSelect');
+    let sedentaryTimer = null;
+    
+    // 設定 1.5 小時 (90分鐘 * 60秒 * 1000毫秒)
+    const SEDENTARY_TIME_MS = 90 * 60 * 1000; 
 
-    //開始監測按鈕邏輯
+    // 開始監測按鈕邏輯 (包含久坐計時器)
     startBtn.onclick = function() {
         const id = cameraSelect.value;
         console.log("嘗試開啟相機 ID:", id);
@@ -347,7 +339,7 @@
         // 啟動循環計時器
         sedentaryTimer = setInterval(() => {
             // 更新右下角的AI提示
-            document.getElementById('aiMessageText').innerText = "您已經坐了一個半小時囉！軍師建議您起身喝口水、伸展一下筋骨，保護腰椎與眼睛！";
+            document.getElementById('aiMessageText').innerText = "您已經坐了一個半小時囉！建議您起身喝口水、伸展一下筋骨，保護腰椎與眼睛！";
             document.querySelector('.ai-prompt-box strong').innerText = "⏰ 貼心久坐提醒";
             document.querySelector('.ai-prompt-box strong').className = "d-block mb-1 text-info";
             
@@ -362,7 +354,7 @@
             newLog.className = "alert-item";
             newLog.style.borderLeftColor = "#0dcaf0";
             
-            // 這裡使用反引號來包裝 HTML 字串
+            // 這裡使用反引號 (Backtick) 來包裝 HTML 字串
             newLog.innerHTML = `
                 <div class="d-flex w-100 justify-content-between">
                     <strong class="text-info">久坐提醒</strong>
@@ -389,7 +381,7 @@
             sedentaryTimer = null;
         }
     };
-    };
+    
 
     // 接收後端傳來的AI矯正建議
 socket.on('ai_alert', function(data) {
