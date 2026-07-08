@@ -79,7 +79,7 @@
             background-color: #333333;
         }
 
-        /* 綠色開始按鈕 */
+        /* 開始按鈕 */
         button#startBtn { background-color: #2ecc71; color: white; }
         button#startBtn:hover { 
             background-color: #27ae60; 
@@ -87,7 +87,7 @@
             box-shadow: 0 6px 12px rgba(46, 204, 113, 0.25);
         }
 
-        /* 紅色暫停按鈕 */
+        /* 暫停按鈕 */
         button#stopBtn { background-color: #e74c3c; color: white; }
         button#stopBtn:hover { 
             background-color: #c0392b; 
@@ -95,7 +95,7 @@
             box-shadow: 0 6px 12px rgba(231, 76, 60, 0.25);
         }
 
-        /* 3. 面板與其他元件適應黑底的樣式 */
+        /* 面板與其他元件 */
         .glass-panel {
             background-color: rgba(25, 25, 25, 0.7);
             border: 1px solid rgba(255, 255, 255, 0.1);
@@ -235,7 +235,7 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
 <div class="container-fluid pb-5 px-4 px-md-5 mt-4">
-    <!-- 標題與控制項區塊 (置中) -->
+
     <div class="row mb-4">
         <div class="col-12 text-center">
             <h1 class="mb-4">AI 坐姿即時監測</h1>
@@ -243,7 +243,7 @@
                 <div class="controls">
                     <label>選擇相機：</label>
                     <select id="cameraSelect">
-                        <!-- 假設相機資料來自後端 -->
+
                         <option value="0">Camera 0</option> 
                     </select>
                     <button id="startBtn">開始監測</button>
@@ -253,10 +253,10 @@
         </div>
     </div>
 
-    <!-- 左右分欄核心區塊 -->
+    <!-- 左右分欄 -->
     <div class="row g-4">
         
-        <!-- 左側：偵測畫面 (佔據 8 格寬度，在中小型螢幕佔滿 12 格) -->
+        <!-- 左側：偵測畫面 -->
         <div class="col-12 col-lg-8">
             <div class="glass-panel p-3 h-100 d-flex flex-column">
                 <h5 class="mb-3 fw-bold text-white-50"><i class="bi bi-camera-video me-2"></i>即時影像分析</h5>
@@ -269,15 +269,15 @@
             </div>
         </div>
 
-        <!-- 右側：彈窗紀錄與 AI 提示 (佔據 4 格寬度，在中小型螢幕佔滿 12 格) -->
+        <!-- 右下：彈窗紀錄與 AI 提示 -->
         <div class="col-12 col-lg-4 d-flex flex-column">
             
-            <!-- 右上：紀錄到時跳出的彈窗列表 (設定固定高度並可捲動) -->
+            <!-- 右上：紀錄到時跳出的彈窗列表 -->
             <div class="glass-panel p-3 mb-4 flex-grow-1" style="max-height: 350px; overflow-y: auto;">
                 <h5 class="mb-3 fw-bold text-white-50"><i class="bi bi-clock-history me-2"></i>即時動態</h5>
                 
                 <div id="logContainer">
-                    <!-- 預設的提示項目 -->
+
                     <div class="alert-item">
                         <div class="d-flex w-100 justify-content-between">
                             <strong class="text-success">系統就緒</strong>
@@ -314,9 +314,6 @@
 <script>
     // 新增：久坐計時器變數
     let sedentaryTimer = null;
-
-    // 設定 1.5 小時 (90分鐘 * 60秒 * 1000毫秒)
-    // 💡 軍師建議：您在測試階段可以先改成 5000 (5秒)，確定會跳出提示後，再改回 5400000
     const SEDENTARY_TIME_MS = 90 * 60 * 1000;
 
     const startBtn = document.getElementById('startBtn');
@@ -327,20 +324,14 @@
 
     startBtn.onclick = function() {
         
-    // 宣告原本的元素變數與新增的計時器變數
+    // 宣告元素變數與計時器變數
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
     const videoImg = document.getElementById('videoStream');
     const placeholder = document.getElementById('placeholder');
     const cameraSelect = document.getElementById('cameraSelect');
 
-    let sedentaryTimer = null; // 新增：久坐計時器變數
-    
-    // 設定 1.5 小時 (90分鐘 * 60秒 * 1000毫秒)
-    // 💡 軍師建議：您在測試時可以先改成 5000 (5秒)，確定會跳出提示後再改回來
-    const SEDENTARY_TIME_MS = 90 * 60 * 1000; 
-
-    //開始監測按鈕邏輯 (包含久坐計時器)
+    //開始監測按鈕邏輯
     startBtn.onclick = function() {
         const id = cameraSelect.value;
         console.log("嘗試開啟相機 ID:", id);
@@ -355,12 +346,12 @@
         
         // 啟動循環計時器
         sedentaryTimer = setInterval(() => {
-            // 1. 更新右下角的 AI 軍師提示
+            // 更新右下角的AI提示
             document.getElementById('aiMessageText').innerText = "您已經坐了一個半小時囉！軍師建議您起身喝口水、伸展一下筋骨，保護腰椎與眼睛！";
             document.querySelector('.ai-prompt-box strong').innerText = "⏰ 貼心久坐提醒";
             document.querySelector('.ai-prompt-box strong').className = "d-block mb-1 text-info";
             
-            // 2. 在右上角的動態紀錄中新增一筆
+            // 在右上角的動態紀錄中新增一筆
             const logContainer = document.getElementById('logContainer');
             const now = new Date();
             const timeString = now.getHours().toString().padStart(2, '0') + ':' + 
@@ -369,9 +360,9 @@
                                
             const newLog = document.createElement('div');
             newLog.className = "alert-item";
-            newLog.style.borderLeftColor = "#0dcaf0"; // 柔和的青色邊框
+            newLog.style.borderLeftColor = "#0dcaf0";
             
-            // 這裡使用反引號 (Backtick) 來包裝 HTML 字串
+            // 這裡使用反引號來包裝 HTML 字串
             newLog.innerHTML = `
                 <div class="d-flex w-100 justify-content-between">
                     <strong class="text-info">久坐提醒</strong>
@@ -387,7 +378,7 @@
     };
 
 
-    // 暫停按鈕邏輯 (包含清除計時器)
+    // 暫停按鈕 (包含清除計時器)
     stopBtn.onclick = function() {
         videoImg.src = "";
         videoImg.style.display = "none";
@@ -400,14 +391,14 @@
     };
     };
 
-    // 接收後端傳來的 AI 矯正建議
+    // 接收後端傳來的AI矯正建議
 socket.on('ai_alert', function(data) {
-    // 1. 更新右下角的 AI 軍師提示
+    // 更新右下角的AI提示
     document.getElementById('aiMessageText').innerText = data.message;
     document.querySelector('.ai-prompt-box strong').innerText = "⚠️ 偵測到不良姿勢";
     document.querySelector('.ai-prompt-box strong').className = "d-block mb-1 text-warning";
     
-    // 2. 在右上角的動態紀錄中新增一筆
+    // 在右上角的動態紀錄中新增一筆
     const logContainer = document.getElementById('logContainer');
     const now = new Date();
     const timeString = now.getHours().toString().padStart(2, '0') + ':' + 
@@ -416,7 +407,7 @@ socket.on('ai_alert', function(data) {
                        
     const newLog = document.createElement('div');
     newLog.className = "alert-item";
-    newLog.style.borderLeftColor = "#f59e0b"; // 警告色
+    newLog.style.borderLeftColor = "#f59e0b";
     newLog.innerHTML = `
         <div class="d-flex w-100 justify-content-between">
             <strong class="text-warning">姿勢警告</strong>
