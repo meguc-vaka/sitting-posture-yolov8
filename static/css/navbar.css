@@ -1,0 +1,22 @@
+nav.navbar {
+    background-color: #15dee8 !important;
+    min-height: auto;
+    padding: 0 !important;
+}
+
+.navbar-nav .nav-link {
+    color: white !important;
+    font-size: 1.1rem;
+    padding: 0.4rem 1.5rem !important; /* 縮小垂直間距 */
+}
+
+/* --- 主內容區比例 --- */
+.main-container {
+    width: 85%;
+    margin: 2% auto;
+}
+
+hr {
+    width: 85%;
+    margin: 1% auto;
+}

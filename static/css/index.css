@@ -1,0 +1,51 @@
+/* 你的原始設定 */
+body {
+    background-color: #ffffff;
+    color: rgb(25, 2, 2);
+    font-family: 'Segoe UI', Arial, sans-serif;
+    text-align: center;
+    padding: 20px;
+}
+
+.container {
+    max-width: 800px;
+    margin: auto;
+}
+
+h1 { font-weight: bold; margin-bottom: 30px; }
+
+/* 下拉選單與按鈕樣式 */
+select, button {
+    padding: 8px 15px;
+    border-radius: 4px;
+    border: 1px solid #4A5568;
+    font-weight: bold;
+    margin: 0 5px;
+}
+
+select { background-color: white; color: #333; }
+#startBtn { background-color: #4CAF50; color: rgb(0, 0, 0); cursor: pointer; }
+#stopBtn { background-color: #E53E3E; color: rgb(0, 0, 0); cursor: pointer; }
+
+/* 影像外框修正：加上 max-width 防止超出螢幕 */
+.video-box {
+    margin: 20px auto;
+    border: 3px solid #4A5568;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    background-color: #000;
+    
+    /* 這裡修復畫面過大的問題 */
+    max-width: 100%; 
+    width: 640px;    /* 保持你原本的設定值 */
+    height: 480px;
+    display: inline-block; /* 配合原本的置中方式 */
+}
+
+/* 確保圖片縮放不超過框框 */
+#videoStream {
+    max-width: 100%;
+    height: auto;
+    object-fit: contain;
+}
