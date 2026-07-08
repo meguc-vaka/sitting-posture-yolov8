@@ -3,13 +3,12 @@ import numpy as np
 import base64
 import time
 import sqlite3
-import threading
 import math
+import hashlib
+import threading
 from collections import deque
-from flask import Flask, render_template
+from flask import Flask, render_template, session, redirect, url_for, request
 from flask_socketio import SocketIO, emit
-from flask import render_template, request
-
 from models.load_model import Model
 from controllers.controller import Controller
 
@@ -61,7 +60,7 @@ def insert_posture_record_if_any():
         return
 
     now_ts = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
-
+    record_lock = threading.Lock()
     with record_lock:
         # 持鎖後再算一次，避免並發競態
         total2 = sum(posture_counts.values())
@@ -172,6 +171,7 @@ def handle_frame(data):
 
             # === 3 分鐘聚合計數（與 AI 警告邏輯平行，互不干擾） ===
             if posture_status in posture_counts:
+                record_lock = threading.Lock()
                 with record_lock:
                     posture_counts[posture_status] += 1
                     if time.time() - last_record_time >= 180:
@@ -223,6 +223,7 @@ def handle_frame(data):
 def handle_connect():
     """重連時先將舊 session 的累計數據落庫，再重置所有會話狀態，避免跨 session 汙染。"""
     global last_record_time, last_warning_time
+    record_lock = threading.Lock()
     with record_lock:
         insert_posture_record_if_any()
         for k in posture_counts:
@@ -238,6 +239,7 @@ def handle_disconnect():
     """尾部強制結算：關閉頁面時把未滿 180 秒的累計數據寫入庫。
     觸發條件：距離上次入庫超過 30 秒（避免閃斷刷新就觸發）。"""
     global last_record_time
+    record_lock = threading.Lock()
     with record_lock:
         if time.time() - last_record_time >= 30:
             insert_posture_record_if_any()
@@ -278,6 +280,44 @@ def posture_analysis():
     }
     
     return render_template('analysis.html', chart_data=chart_data)
+
+@app.route('/login', methods=['POST'])
+def login():
+    # 1. 取得使用者在網頁表單輸入的帳號密碼
+    email = request.form.get('email')
+    password = request.form.get('password')
+    
+    # 2. 建立資料庫連線
+    conn = sqlite3.connect('database.db')
+    conn.row_factory = sqlite3.Row  # 讓回傳的資料可以用欄位名稱讀取
+    cursor = conn.cursor()
+    
+    # 3. 去資料庫尋找這個信箱
+    cursor.execute("SELECT * FROM users WHERE email = ?", (email,))
+    user = cursor.fetchone()
+    conn.close()  # 查完就可以關閉連線了
+    
+    # 4. 密碼驗證 (將輸入的密碼做 MD5 處理後，與資料庫比對)
+    if user:
+        hashed_input_password = hashlib.md5(password.encode()).hexdigest()
+        
+        if user['password'] == hashed_input_password:
+            # 登入成功！將重要資訊寫入 Session (使用者的通行證)
+            session['loggedIn'] = True
+            session['userId'] = user['userId']
+            session['firstName'] = user['firstName']
+            
+            # 根據 isAdmin 標籤，發給不同的權限
+            if user['isAdmin'] == 1:
+                session['role'] = 'admin'
+            else:
+                session['role'] = 'user'
+                
+            # 登入成功後，把使用者踢回首頁 (假設首頁的函數名稱為 index)
+            return redirect(url_for('index'))
+            
+    # 如果找不到帳號，或是密碼比對失敗
+    return "帳號或密碼錯誤，請回上一頁重新輸入"
 
 if __name__ == '__main__':
     print("伺服器啟動中... 請前往 http://127.0.0.1:5000")
