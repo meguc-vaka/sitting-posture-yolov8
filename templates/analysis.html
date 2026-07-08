@@ -10,7 +10,6 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
     
-    <!-- 引入 Chart.js 圖表套件 -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
@@ -43,8 +42,7 @@
             padding: 30px;
             box-shadow: 0 15px 35px rgba(0,0,0,0.5);
         }
-        
-        /* 圖表的響應式容器 */
+
         .chart-container {
             position: relative;
             height: 60vh;
@@ -59,7 +57,6 @@
 </head>
 <body>
 
-<!-- 頂部導覽列 (與其他頁面保持一致) -->
 <header class="container-fluid border-bottom">
     <div class="row align-items-center py-2">
         <div class="col-4 ps-4">
@@ -104,7 +101,7 @@
                 <li class="nav-item"><a href="/" class="nav-link">首頁</a></li>
                 <li class="nav-item"><a href="/rococo" class="nav-link">骨架偵測</a></li>
                 <li class="nav-item"><a href="/renaissance" class="nav-link">姿勢紀錄</a></li>
-                <!-- 標記目前在數據分析頁面 -->
+
                 <li class="nav-item"><a href="/analysis" class="nav-link active" style="color: #3b82f6 !important;">數據分析</a></li>
             </ul>
         </div>
@@ -118,7 +115,7 @@
             <h3 class="mb-0 fw-bold" style="text-shadow: 0 2px 4px rgba(0,0,0,0.5);">姿勢趨勢變化圖</h3>
         </div>
         
-        <!-- 這是用來畫圖的畫布 -->
+        <!-- 用來畫圖的畫布 -->
         <div class="chart-container">
             <canvas id="postureChart"></canvas>
         </div>
@@ -134,11 +131,10 @@
 
 <!-- 驅動圖表的 JavaScript -->
 <script>
-    // 設定 Chart.js 的全局文字顏色，適應深色主題
+
     Chart.defaults.color = '#ecf0f1';
     Chart.defaults.font.family = "'Helvetica Neue', 'Segoe UI', sans-serif";
 
-    // 接收來自 Flask 的數據，加上 safe 確保引號不會被轉義
     const chartData = {{ chart_data | tojson | safe }};
 
     const ctx = document.getElementById('postureChart').getContext('2d');
