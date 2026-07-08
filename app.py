@@ -10,7 +10,7 @@ from flask import Flask, render_template
 from flask_socketio import SocketIO, emit
 from flask import render_template, request
 
-from app_models.load_model import Model
+from models.load_model import Model
 from controllers.controller import Controller
 
 app = Flask(__name__)
