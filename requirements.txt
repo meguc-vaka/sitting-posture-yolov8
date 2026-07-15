@@ -4,6 +4,3 @@ eventlet==0.33.3
 ultralytics==8.0.0
 numpy
 opencv-python-headless
-
-pip install flask-socketio eventlet
-pip install ultralytics
