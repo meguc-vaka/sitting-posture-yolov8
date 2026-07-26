@@ -7,11 +7,16 @@ import math
 import hashlib
 import threading
 import traceback
+import smtplib
 from collections import deque
 from flask import Flask, render_template, session, redirect, url_for, request
 from flask_socketio import SocketIO, emit
 from models.load_model import Model
 from controllers.controller import Controller
+from flask_apscheduler import APScheduler
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.header import Header
 
 app = Flask(__name__)
 # 設定 Session 的加密金鑰
@@ -397,6 +402,114 @@ def logout():
     # 登出後，把使用者踢回首頁
     return redirect(url_for('index'))
 
+class Config:
+    SCHEDULER_API_ENABLED = True
+
+app.config.from_object(Config())
+scheduler = APScheduler()
+
+DB_FILE = 'database.db'
+
+# ================= 請填入你的測試設定 =================
+SMTP_SERVER = 'smtp.gmail.com'         # 如果是 Gmail 不用改
+SMTP_PORT = 465                        # SSL 端口
+
+SENDER_EMAIL = 'startpan070@gmail.com'   # 寄件人 Gmail 帳號
+SENDER_PASSWORD = 'mqpp ahrw tbbb ypuu'  # Google 產生的應用程式專用密碼
+RECEIVER_EMAIL = 'startpan070@gmail.com' # 收件人 Email
+# ===================================================
+
+def get_all_users_from_db():
+    """從資料庫讀取所有一般用戶的資料"""
+    users = []
+    try:
+        # 在函數內部建立連線，確保執行緒安全
+        conn = sqlite3.connect(DB_FILE)
+        # 設定 row_factory 可以讓我們像字典一樣透過欄位名稱（如 user['email']）取值
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # 撈取所有一般用戶 (isAdmin = 0)，如果管理員也要收信，可以拿掉 WHERE 條件
+        cursor.execute("SELECT email, firstName, lastName FROM users WHERE isAdmin = 0")
+        users = cursor.fetchall()
+        
+        conn.close()
+    except Exception as e:
+        print(f"【資料庫錯誤】無法讀取使用者資料: {e}")
+    return users
+
+def send_weekly_email_to_all_users():
+    """核心功能：從資料庫抓取名單並逐一發送客製化信件"""
+    print("【系統通知】開始執行每週批次發信任務...")
+    
+    # 1. 從資料庫獲取使用者清單
+    users = get_all_users_from_db()
+    
+    if not users:
+        print("【系統通知】資料庫中沒有找到任何使用者，終止發信。")
+        return False
+
+    try:
+        # 2. 建立安全 SMTP 連線 (在迴圈外連線一次即可，效率較高)
+        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
+            server.login(SENDER_EMAIL, SENDER_PASSWORD)
+            
+            # 3. 透過 for 迴圈逐一為每個使用者客製化郵件內容
+            for user in users:
+                email = user['email']
+                # 結合名與姓，若欄位為空則給預設稱呼
+                first_name = user['firstName'] if user['firstName'] else ""
+                last_name = user['lastName'] if user['lastName'] else "用戶"
+                full_name = f"{first_name}{last_name}"
+                
+                # 建立支援多元格式的郵件容器
+                message = MIMEMultipart('alternative')
+                message['From'] = Header(f"官方系統通知 <{SENDER_EMAIL}>", 'utf-8')
+                message['To'] = Header(email, 'utf-8')
+                message['Subject'] = Header(f"【週報】{full_name}，這是您本週的專屬通知", 'utf-8')
+                
+                # 撰寫給該使用者的客製化內文
+                content = f"""
+                親愛的 {full_name} 您好：
+                
+                感謝您註冊我們的網站！這是一封每週定期發送的系統通知信。
+                為了使你的坐姿觀測更準確我們提醒你記得更新BMI
+                
+                祝您有美好的一天！
+                官方團隊 敬上
+                """
+                
+                part_text = MIMEText(content, 'plain', 'utf-8')
+                message.attach(part_text)
+                
+                # 發送郵件
+                server.sendmail(SENDER_EMAIL, [email], message.as_string())
+                print(f"成功發送給: {full_name} ({email})")
+                
+        print("【系統通知】所有使用者的郵件均已發送完畢！")
+        return True
+    except Exception as e:
+        print(f"【系統錯誤】批次發信過程中發生錯誤: {e}")
+        return False
+
+# ================= 定時任務設定 =================
+@scheduler.task('cron', id='weekly_test_job', day_of_week='sun', hour=19, minute=33)
+def scheduled_job():
+    with app.app_context():
+        send_weekly_email_to_all_users()
+
+@app.route('/test-send-all')
+def test_send_all():
+    """手動測試路由：點擊後立刻從資料庫撈資料並發信"""
+    success = send_weekly_email_to_all_users()
+    if success:
+        return "<h3>批次發信順利完成！請確認終端機 (Terminal) 的發送日誌。</h3>"
+    else:
+        return "<h3>發信失敗，請檢查終端機的錯誤訊息。</h3>"
+    
 if __name__ == '__main__':
+    scheduler.init_app(app)
+    scheduler.start()
+
     print("伺服器啟動中... 請前往 http://127.0.0.1:5000")
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True, use_reloader=False)

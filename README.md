@@ -17,7 +17,7 @@
             
   -> 指令 A: pip install "setuptools<82"
   -> 指令 B: pip install -U ultralytics
-        (建議 ultralytics == 8.4.95)
+        (建議 ultralytics==8.4.95)
 
 
 [步驟 3] 啟動應用程式
