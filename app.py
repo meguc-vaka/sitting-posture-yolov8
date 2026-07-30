@@ -8,6 +8,7 @@ import hashlib
 import threading
 import traceback
 import smtplib
+from db import query_db, execute_db
 from collections import deque
 from flask import Flask, render_template, session, redirect, url_for, request
 from flask_socketio import SocketIO, emit
@@ -380,6 +381,7 @@ def login():
             # 登入成功！將重要資訊寫入 Session (使用者的通行證)
             session['loggedIn'] = True
             session['userId'] = user['userId']
+            session['email'] = user['email']
             session['firstName'] = user['firstName']
             
             # 根據 isAdmin 標籤，發給不同的權限
@@ -506,7 +508,92 @@ def test_send_all():
         return "<h3>批次發信順利完成！請確認終端機 (Terminal) 的發送日誌。</h3>"
     else:
         return "<h3>發信失敗，請檢查終端機的錯誤訊息。</h3>"
+
+def getLoginDetails():
+    if 'email' not in session:
+        return False, ''
     
+    user = query_db("SELECT userId, firstName FROM users WHERE email = ?", (session['email'],), one=True)
+    if not user:
+        return False, ''
+    
+    userId, firstName = user
+    return True, firstName
+
+@app.route("/profileHome")
+def profileHome():
+    if 'email' not in session:
+        return redirect(url_for('index'))
+    loggedIn, firstName = getLoginDetails()
+    profileData = query_db("SELECT email, firstName, lastName, address1, phone, weight, height FROM users WHERE email = ?", (session['email'],), one=True)
+    return render_template("profileHome.html", profileData=profileData, loggedIn=loggedIn, firstName=firstName)
+
+@app.route("/editProfile")
+def editProfile():
+    if 'email' not in session:
+        return redirect(url_for('index'))
+    loggedIn, firstName = getLoginDetails()
+    profileData = query_db("SELECT email, firstName, lastName, address1, phone, weight, height FROM users WHERE email = ?", (session['email'],), one=True)
+    return render_template("editProfile.html", profileData=profileData, loggedIn=loggedIn, firstName=firstName)
+
+@app.route("/account/profile/changePassword", methods=["GET", "POST"])
+def changePassword():
+    if 'email' not in session:
+        return redirect(url_for('loginForm'))
+    if request.method == "POST":
+        oldPassword = request.form['oldpassword']
+        oldPassword = hashlib.md5(oldPassword.encode()).hexdigest()
+        newPassword = request.form['newpassword']
+        newPassword = hashlib.md5(newPassword.encode()).hexdigest()
+        user = query_db("SELECT userId, password FROM users WHERE email = ?", (session['email'],), one=True)
+        if user:
+            userId, password = user
+            if (password == oldPassword):
+                try:
+                    execute_db("UPDATE users SET password = ? WHERE userId = ?", (newPassword, userId))
+                    msg = "Changed successfully"
+                except Exception as e:
+                    msg = "Failed"
+                return render_template("changePassword.html", msg=msg)
+            else:
+                msg = "Wrong password"
+                return render_template("changePassword.html", msg=msg)
+        else:
+            msg = "User not found"
+            return render_template("changePassword.html", msg=msg)
+    else:
+        return render_template("changePassword.html")
+
+@app.route("/updateProfile", methods=["GET", "POST"])
+def updateProfile():
+    if request.method == 'POST':
+        email = request.form['email']
+        firstName = request.form['firstName']
+        lastName = request.form['lastName']
+        address1 = request.form['address1']
+        phone = request.form['phone']
+        weight = request.form['weight']
+        height = request.form['height']
+        try:
+            execute_db(
+                '''UPDATE users 
+                   SET firstName = ?, lastName = ?, address1 = ?, phone = ?, weight = ?, height = ? 
+                   WHERE email = ?''',
+                (firstName, lastName, address1, phone, weight, height, email)
+            )
+            msg = "Saved Successfully"
+        except Exception as e:
+            msg = "Error occured"
+        return redirect(url_for('editProfile'))
+
+@app.route("/account/profile/view")
+def viewProfile():
+    if 'email' not in session:
+        return redirect(url_for('loginForm'))
+    loggedIn, firstName = getLoginDetails()
+    profileData = query_db("SELECT email, firstName, lastName, address1, phone, weight, height FROM users WHERE email = ?", (session['email'],), one=True)
+    return render_template("profileHome.html", profileData=profileData, loggedIn=loggedIn, firstName=firstName)
+
 if __name__ == '__main__':
     scheduler.init_app(app)
     scheduler.start()

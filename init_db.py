@@ -1,5 +1,6 @@
 import sqlite3
 import hashlib
+from werkzeug.security import generate_password_hash
 
 def init_db():
     conn = sqlite3.connect('database.db')
@@ -16,7 +17,9 @@ def init_db():
         lastName TEXT,
         address1 TEXT,
         phone TEXT,
-        isAdmin INTEGER DEFAULT 0  -- 0 代表一般用戶，1 代表管理員
+        isAdmin INTEGER DEFAULT 0,  -- 0 代表一般用戶，1 代表管理員
+        height REAL,             -- 身高 (cm)，SQLite 的浮點數使用 REAL
+        weight REAL             -- 體重 (kg)，SQLite 的浮點數使用 REAL
     )
     ''')
     
@@ -26,6 +29,12 @@ def init_db():
         INSERT INTO users (email, password, firstName, isAdmin) 
         VALUES (?, ?, ?, ?)
     ''', ("admin@test.com", admin_pw, "SuperAdmin", 1))
+
+    user_pw = hashlib.md5("12345678".encode()).hexdigest()
+    cursor.execute('''
+        INSERT INTO users (email, password, firstName, lastName, isAdmin, height, weight) 
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', ("startpan070@gmail.com", user_pw, "Test", "User", 0, 175.5, 68.0))
     
 
     # 2. 姿勢紀錄資料表 (細項)

@@ -1,0 +1,35 @@
+<!DOCTYPE HTML>
+<html>
+
+<head>
+	<title>Profile Home</title>
+	<link rel="stylesheet" href={{ url_for('static', filename='css/profileHome.css' ) }} />
+	<link rel="stylesheet" href={{ url_for('static', filename='css/topStyle.css' ) }} />
+	<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+</head>
+
+<body>
+	<div class="displayCategory">
+		<nav class="category-navbar">
+		</nav>
+	</div>
+	<div class="display" id="userdata">
+		<h1>會員資料</h1>
+		<hr>
+		<p>Email: <span>{{profileData[0]}}</span></p>
+		<p>電話號碼: <span>{{profileData[1]}}</span></p>
+		<p>名字: <span>{{profileData[2]}}</span></p>
+		<p>姓氏: <span>{{profileData[3]}}</span></p>
+		<p>體重: <span>{{profileData[5]}}</span></p>
+		<p>身高: <span>{{profileData[6]}}</span></p>
+		<div style="margin-top: 24px;">
+			<a href="{{ url_for('editProfile') }}" class="btn-edit">修改資料</a>
+			<a href="{{ url_for('changePassword') }}" class="btn-edit">修改密碼</a>
+		</div>
+	</div>
+</body>
+<footer id="footer">
+	<p>&copy; 最終解釋權與所有權歸製作者所有</p>
+</footer>
+
+</html>
