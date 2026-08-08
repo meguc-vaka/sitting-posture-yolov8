@@ -1,38 +1,45 @@
+import base64, hashlib, math, smtplib, sqlite3, threading, time, traceback
+from collections import deque
+from email.header import Header
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
 import cv2
 import numpy as np
-import base64
-import time
-import sqlite3
-import math
-import hashlib
-import threading
-import traceback
-import smtplib
-from db import query_db, execute_db
-from collections import deque
-from flask import Flask, render_template, session, redirect, url_for, request
-from flask_socketio import SocketIO, emit
-from models.load_model import Model
-from controllers.controller import Controller
+from flask import Flask, redirect, render_template, request, session, url_for
 from flask_apscheduler import APScheduler
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.header import Header
+from flask_socketio import SocketIO, emit
+
+from controllers.controller import Controller
+from db import init_db, query_db, execute_db
+from models.load_model import Model
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
-# 設定 Session 的加密金鑰
-app.secret_key = 'secret_key_for_session'
-
+app.secret_key = 'secret_key_for_session' # 設定 Session 的加密金鑰
 socketio = SocketIO(app, cors_allowed_origins="*")
-record_lock = threading.RLock()  # 全域只宣告一次鎖頭
-last_record_time = time.time()  # 紀錄初始時間
-# 建立一個用來統計姿勢的字典
-posture_counts = {
+
+record_lock = threading.RLock()     # 全域只宣告一次鎖頭
+last_record_time = time.time()      # 紀錄初始時間
+posture_counts = {                  # 建立一個用來統計姿勢的字典
     "Good": 0,
     "TurtleNeck": 0,
     "LookingDown": 0,
     "Slouching": 0
 }
+
+# 3 分鐘姿勢聚合計數器（全局共享，重連不丟數據）
+posture_history = deque(
+    maxlen=30                       # 代表這條輸送帶最多只記得過去 30 次的判定結果 (約 3 秒)
+) 
+last_warning_time = 0               # 記錄上一次發送 AI 警告的時間戳記
+COOLDOWN_SECONDS = 60               # 設定冷卻時間為 60 秒
+
+DB_PATH = 'database.db'
+init_db()  # 啟動伺服器前自動檢查並建表
+
+print("正在初始化 AI 模型...")
+pose_model = Model("yolov8n-pose.pt")
 
 @app.route('/')
 def index():
@@ -46,39 +53,7 @@ def scanpage():
 def login_form():
     return render_template('login.html')
 
-print("正在初始化 AI 模型...")
-pose_model = Model("yolov8n-pose.pt")
-
-
-# 系統短期記憶與冷卻設定區
-# maxlen=30 代表這條輸送帶最多只記得過去 30 次的判定結果 (約 3 秒)
-posture_history = deque(maxlen=30) 
-last_warning_time = 0               # 記錄上一次發送 AI 警告的時間戳記
-COOLDOWN_SECONDS = 60               # 設定冷卻時間為 60 秒
-
-
-# 3 分鐘姿勢聚合計數器（全局共享，重連不丟數據）
-DB_PATH = 'database.db'
-
-# === 資料庫初始化 ===
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS posture_records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            good_count INTEGER,
-            turtle_neck_count INTEGER,
-            looking_down_count INTEGER,
-            slouching_count INTEGER,
-            timestamp TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-init_db()  # 啟動伺服器前自動檢查並建表
-
-
+# === 寫入並重置坐姿紀錄 ===
 def insert_posture_record_if_any():
     """把當前聚合計數寫入 posture_records 表，寫完後清零並重置計時器。
     若 total <= 0 則直接 return，不寫空記錄。
@@ -96,53 +71,44 @@ def insert_posture_record_if_any():
         if total2 <= 0:
             return
 
-        conn = sqlite3.connect(DB_PATH)
-        try:
-            conn.execute(
-                """
-                INSERT INTO posture_records (
-                    good_count, turtle_neck_count,
-                    looking_down_count, slouching_count, timestamp
-                ) VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    posture_counts["Good"],
-                    posture_counts["TurtleNeck"],
-                    posture_counts["LookingDown"],
-                    posture_counts["Slouching"],
-                    now_ts,
-                ),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        query = """
+            INSERT INTO posture_records (
+                good_count, turtle_neck_count,
+                looking_down_count, slouching_count, timestamp
+            ) VALUES (?, ?, ?, ?, ?)
+        """
+        args = (
+            posture_counts['Good'],
+            posture_counts['TurtleNeck'],
+            posture_counts['LookingDown'],
+            posture_counts['Slouching'],
+            now_ts,
+        )
+        execute_db(query, args)
 
         # 清零並刷新時間戳
         for k in posture_counts:
             posture_counts[k] = 0
         last_record_time = time.time()
 
-
+# 取得坐姿歷史紀錄（含分頁與狀態判斷）並渲染頁面(record.html)
 @app.route('/renaissance')
 def posture_record():
     # 1. 取得當前頁碼 (預設為第 1 頁) 與每頁顯示筆數
     page = request.args.get('page', 1, type=int)
     per_page = 10 
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    # 2. 計算總紀錄數與總頁數
-    cursor.execute("SELECT COUNT(*) FROM posture_records")
-    total_records = cursor.fetchone()[0]
+    # 2. 計算總紀錄數與總頁數 (使用 one=True 取得單一紀錄)
+    total_row = query_db("SELECT COUNT(*) FROM posture_records", one=True)
+    total_records = total_row[0] if total_row else 0
     total_pages = math.ceil(total_records / per_page)
 
     # 3. 根據頁碼，計算要「跳過」幾筆資料 (OFFSET)，再撈取該頁資料 (LIMIT)
     offset = (page - 1) * per_page
-    cursor.execute("SELECT * FROM posture_records ORDER BY timestamp DESC LIMIT ? OFFSET ?", (per_page, offset))
-    db_records = cursor.fetchall()
-    conn.close()
+    db_records = query_db(
+        "SELECT * FROM posture_records ORDER BY timestamp DESC LIMIT ? OFFSET ?", 
+        (per_page, offset)
+    )
     
     history_data = []
     for row in db_records:
@@ -167,7 +133,7 @@ def posture_record():
             "angle": f"低頭: {row['looking_down_count']} 幀",
             "note": f"良好姿勢共維持 {row['good_count']} 幀"
         })
-        
+
     # 4. 將分頁所需的數據打包，一併傳給網頁
     return render_template('record.html', 
                            records=history_data,
@@ -176,8 +142,8 @@ def posture_record():
                            total_records=total_records,
                            per_page=per_page)
 
-
 # 建立一個 WebSocket 接收通道，名稱叫做 'video_frame'
+#接收前端影像幀進行 AI 姿勢識別、骨架標記繪製、定期統計落庫與不良姿勢即時警告
 @socketio.on('video_frame')
 def handle_frame(data):
     global last_warning_time # 宣告我們要修改全域的冷卻時間變數
@@ -236,7 +202,6 @@ def handle_frame(data):
                     last_warning_time = current_time
                     posture_history.clear()
 
-
         # 把畫好骨架的圖片壓縮並轉回 Base64，丟回前端
         ret, buffer = cv2.imencode('.jpg', frame)
         if ret:
@@ -247,7 +212,7 @@ def handle_frame(data):
         print(f"處理影像時發生錯誤: {e}")
         traceback.print_exc()
 
-
+#處理 WebSocket 新連線
 @socketio.on('connect')
 def handle_connect():
     """重連時先將舊 session 的累計數據落庫，再重置所有會話狀態，避免跨 session 汙染。"""
@@ -261,7 +226,7 @@ def handle_connect():
     posture_history.clear()
     last_warning_time = 0
 
-
+#處理 WebSocket 斷線：
 @socketio.on('disconnect')
 def handle_disconnect():
     """尾部強制結算：關閉頁面時把未滿 180 秒的累計數據寫入庫。
@@ -271,16 +236,11 @@ def handle_disconnect():
         if time.time() - last_record_time >= 30:
             insert_posture_record_if_any()
 
+#坐姿紀錄整理成圖表
 @app.route('/analysis')
 def posture_analysis():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    
-    # 撈取最近的 30 筆紀錄來畫折線圖
-    cursor.execute("SELECT * FROM posture_records ORDER BY timestamp DESC LIMIT 30")
-    db_records = cursor.fetchall()[::-1] 
-    conn.close()
+    db_records = query_db("SELECT * FROM posture_records ORDER BY timestamp DESC LIMIT 30")
+    db_records = db_records[::-1] if db_records else []
     
     # 準備餵給折線圖的資料陣列
     labels = []
@@ -363,15 +323,8 @@ def login():
     email = request.form.get('email')
     password = request.form.get('password')
     
-    # 2. 建立資料庫連線
-    conn = sqlite3.connect('database.db')
-    conn.row_factory = sqlite3.Row  # 讓回傳的資料可以用欄位名稱讀取
-    cursor = conn.cursor()
-    
-    # 3. 去資料庫尋找這個信箱
-    cursor.execute("SELECT * FROM users WHERE email = ?", (email,))
-    user = cursor.fetchone()
-    conn.close()  # 查完就可以關閉連線了
+    # 2. 建立資料庫連線、3. 去資料庫尋找這個信箱
+    user = query_db("SELECT * FROM users WHERE email = ?", (email,), one=True)
     
     # 4. 密碼驗證 (將輸入的密碼做 MD5 處理後，與資料庫比對)
     if user:
@@ -410,9 +363,7 @@ class Config:
 app.config.from_object(Config())
 scheduler = APScheduler()
 
-DB_FILE = 'database.db'
-
-# ================= 請填入你的測試設定 =================
+# ================= 測試設定 =================
 SMTP_SERVER = 'smtp.gmail.com'         # 如果是 Gmail 不用改
 SMTP_PORT = 465                        # SSL 端口
 
@@ -421,42 +372,35 @@ SENDER_PASSWORD = 'mqpp ahrw tbbb ypuu'  # Google 產生的應用程式專用密
 RECEIVER_EMAIL = 'startpan070@gmail.com' # 收件人 Email
 # ===================================================
 
+#取得一般使用者清單
 def get_all_users_from_db():
     """從資料庫讀取所有一般用戶的資料"""
-    users = []
-    try:
-        # 在函數內部建立連線，確保執行緒安全
-        conn = sqlite3.connect(DB_FILE)
-        # 設定 row_factory 可以讓我們像字典一樣透過欄位名稱（如 user['email']）取值
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        # 撈取所有一般用戶 (isAdmin = 0)，如果管理員也要收信，可以拿掉 WHERE 條件
-        cursor.execute("SELECT email, firstName, lastName FROM users WHERE isAdmin = 0")
-        users = cursor.fetchall()
-        
-        conn.close()
-    except Exception as e:
-        print(f"【資料庫錯誤】無法讀取使用者資料: {e}")
-    return users
+    query = "SELECT email, firstName, lastName FROM users WHERE isAdmin = 0"
 
+    return query_db(query)
+
+# 批次發送用戶每週通知信
 def send_weekly_email_to_all_users():
     """核心功能：從資料庫抓取名單並逐一發送客製化信件"""
     print("【系統通知】開始執行每週批次發信任務...")
     
-    # 1. 從資料庫獲取使用者清單
-    users = get_all_users_from_db()
+    # 從資料庫獲取超過 7 天未更新 BMI 或從未更新過的使用者名單
+    users = query_db("""
+        'SELECT * FROM users WHERE (updatedBMI < datetime('now', '-7 days') OR updatedBMI IS NULL OR updatedBMI = '')
+          AND (last_notified_at < datetime('now', '-7 days') OR last_notified_at IS NULL OR last_notified_at = '')
+    """
+    )
     
     if not users:
-        print("【系統通知】資料庫中沒有找到任何使用者，終止發信。")
+        print("【系統通知】資料庫中沒有找到符合條件（超過7天未更新BMI）的使用者，終止發信。")
         return False
 
     try:
-        # 2. 建立安全 SMTP 連線 (在迴圈外連線一次即可，效率較高)
+        # 建立安全 SMTP 連線 (在迴圈外連線一次即可，效率較高)
         with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
             
-            # 3. 透過 for 迴圈逐一為每個使用者客製化郵件內容
+            # 逐一為每個使用者客製化郵件內容
             for user in users:
                 email = user['email']
                 # 結合名與姓，若欄位為空則給預設稱呼
@@ -468,14 +412,14 @@ def send_weekly_email_to_all_users():
                 message = MIMEMultipart('alternative')
                 message['From'] = Header(f"官方系統通知 <{SENDER_EMAIL}>", 'utf-8')
                 message['To'] = Header(email, 'utf-8')
-                message['Subject'] = Header(f"【週報】{full_name}，這是您本週的專屬通知", 'utf-8')
+                message['Subject'] = Header(f"【提醒】{full_name}，記得更新您的 BMI 資料以維持準確度", 'utf-8')
                 
-                # 撰寫給該使用者的客製化內文
+                # 給該使用者的客製化內文
                 content = f"""
                 親愛的 {full_name} 您好：
                 
-                感謝您註冊我們的網站！這是一封每週定期發送的系統通知信。
-                為了使你的坐姿觀測更準確我們提醒你記得更新BMI
+                感謝您使用我們的網站！
+                系統檢測到您已超過 7 天未更新 BMI 資料。為了使您的坐姿觀測與分析更準確，提醒您記得前往系統更新 BMI 數據。
                 
                 祝您有美好的一天！
                 官方團隊 敬上
@@ -488,14 +432,14 @@ def send_weekly_email_to_all_users():
                 server.sendmail(SENDER_EMAIL, [email], message.as_string())
                 print(f"成功發送給: {full_name} ({email})")
                 
-        print("【系統通知】所有使用者的郵件均已發送完畢！")
+        print("【系統通知】所有符合條件使用者的郵件均已發送完畢！")
         return True
     except Exception as e:
         print(f"【系統錯誤】批次發信過程中發生錯誤: {e}")
         return False
 
 # ================= 定時任務設定 =================
-@scheduler.task('cron', id='weekly_test_job', day_of_week='sun', hour=19, minute=33)
+@scheduler.task('cron', id='weekly_test_job', hour=19, minute=30)
 def scheduled_job():
     with app.app_context():
         send_weekly_email_to_all_users()
@@ -586,13 +530,6 @@ def updateProfile():
             msg = "Error occured"
         return redirect(url_for('editProfile'))
 
-@app.route("/account/profile/view")
-def viewProfile():
-    if 'email' not in session:
-        return redirect(url_for('loginForm'))
-    loggedIn, firstName = getLoginDetails()
-    profileData = query_db("SELECT email, firstName, lastName, address1, phone, weight, height FROM users WHERE email = ?", (session['email'],), one=True)
-    return render_template("profileHome.html", profileData=profileData, loggedIn=loggedIn, firstName=firstName)
 
 if __name__ == '__main__':
     scheduler.init_app(app)

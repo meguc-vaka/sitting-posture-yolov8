@@ -17,11 +17,25 @@ def init_db():
         lastName TEXT,
         address1 TEXT,
         phone TEXT,
-        isAdmin INTEGER DEFAULT 0,  -- 0 代表一般用戶，1 代表管理員
         height REAL,             -- 身高 (cm)，SQLite 的浮點數使用 REAL
-        weight REAL             -- 體重 (kg)，SQLite 的浮點數使用 REAL
+        weight REAL,            -- 體重 (kg)
+        updatedBMI TEXT DEFAULT CURRENT_TIMESTAMP,
+        last_notified_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        isAdmin INTEGER DEFAULT 0  -- 0 代表一般用戶，1 代表管理員
     )
     ''')
+
+    # ★★★ 當 height 或 weight 有被 UPDATE 時，自動更新 updatedBMI ★★★
+    cursor.execute("DROP TRIGGER IF EXISTS update_bmi_time")
+    cursor.execute("""
+    CREATE TRIGGER update_bmi_time
+    AFTER UPDATE OF height, weight ON users
+    BEGIN
+        UPDATE users 
+        SET updatedBMI = CURRENT_TIMESTAMP 
+        WHERE userId = OLD.userId;
+    END;
+    """)
     
     # 建立預設的超級管理員帳號 (密碼為 admin123)
     admin_pw = hashlib.md5("admin123".encode()).hexdigest()
