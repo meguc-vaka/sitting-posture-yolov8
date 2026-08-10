@@ -191,6 +191,38 @@
             letter-spacing: 1px;
             border-top: 1px solid rgba(255, 255, 255, 0.05);
         }
+
+        /* --- 手機適配 --- */
+        @media (max-width: 767.98px) {
+            .main-container { padding: 20px 0; }
+
+            .login-card {
+                padding: 24px 20px;
+                border-radius: 12px;
+            }
+
+            #UserLogInText { font-size: 1.4rem; }
+
+            #login input[type="text"],
+            #login input[type="password"] {
+                padding: 10px 14px;
+                font-size: 15px;
+                margin-bottom: 14px;
+            }
+
+            #loginButton {
+                font-size: 15px;
+                padding: 10px;
+            }
+
+            .login-box { margin-right: 0.5rem !important; }
+
+            .member-link { font-size: 0.85rem; }
+
+            #aboutwe { font-size: 0.75rem; padding: 0.1rem 0.5rem; }
+
+            #footer { font-size: 0.8rem; padding: 14px 0; }
+        }
     </style>
 </head>
 
@@ -198,11 +230,11 @@
 
 <header class="container-fluid border-bottom">
     <div class="row align-items-center py-2">
-        <div class="col-4 ps-4">
+        <div class="col-6 col-md-4 ps-4">
             <h4 class="mb-0"><span class="logo-text">Logo</span> 骨架偵測</h4>
         </div>
 
-        <div class="col-8 d-flex justify-content-end align-items-center pe-4">
+        <div class="col-6 col-md-8 d-flex justify-content-end align-items-center pe-4">
             
         <div class="login-box me-4">
         {% if not session.get('loggedIn') %}
@@ -214,7 +246,7 @@
             </a>
             <ul class="dropdown-menu shadow">
                 <li><a class="dropdown-item" href="/renaissance">記錄管理</a></li>
-                <li><a class="dropdown-item" href="#">個人檔案</a></li>
+                <li><a class="dropdown-item" href="/profileHome">個人檔案</a></li>
                 <li><hr class="dropdown-divider"></li>
                 <li><a class="dropdown-item" href="/logout">登出</a></li>
             </ul>
@@ -222,12 +254,12 @@
         {% endif %}
 </div>
 
-            <div class="d-flex align-items-center me-3">
+            <div class="d-none d-md-flex align-items-center me-3">
                 <a id="aboutwe" class="btn btn-outline-light btn-sm" href="#">關於我們</a>
                 <i class="bi bi-globe2 ms-2 text-light"></i>
             </div>
                 
-            <form class="d-flex search-form align-items-center" action="/search" method="get">
+            <form class="d-none d-md-flex search-form align-items-center" action="/search" method="get">
                 <div class="input-group input-group-sm">
                     <input type="search" name="searchQuery" class="form-control" placeholder="Please search...">
                     <button class="btn btn-outline-secondary p-0 ms-2 border-0" type="submit">
@@ -239,9 +271,12 @@
     </div>      
 </header>
 
-<nav class="navbar navbar-expand-lg shadow-sm">
+<nav class="navbar navbar-expand-sm navbar-dark shadow-sm">
     <div class="container-fluid p-0">
-        <div class="collapse navbar-collapse justify-content-start" id="nav-menu">
+        <button class="navbar-toggler ms-3 my-2" type="button" data-bs-toggle="collapse" data-bs-target="#nav-menu-login" aria-controls="nav-menu-login" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse justify-content-start" id="nav-menu-login">
             <ul class="navbar-nav ps-4">
                 <li class="nav-item"><a href="/" class="nav-link">首頁</a></li>
                 <li class="nav-item"><a href="/ScanPage" class="nav-link">骨架偵測</a></li>
@@ -268,7 +303,7 @@
     <div class="row w-100 align-items-center justify-content-center">
         
         <!-- 登入表單 -->
-        <div class="col-md-5">
+        <div class="col-12 col-md-5">
             <div class="login-card">
                 <h2 id="UserLogInText" class="text-center">會員登入</h2>
                 <hr>

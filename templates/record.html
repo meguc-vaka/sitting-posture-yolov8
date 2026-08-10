@@ -170,6 +170,25 @@
             filter: invert(1) !important;
             cursor: pointer !important;
         }
+
+        /* --- 手機適配 --- */
+        @media (max-width: 767.98px) {
+            .record-card { padding: 20px 16px; }
+            .record-card h3 { font-size: 1.2rem; }
+
+            .filter-section { padding: 12px 14px; }
+
+            .d-flex.justify-content-between.align-items-center.mt-3 {
+                flex-direction: column;
+                gap: 12px;
+                align-items: flex-start !important;
+            }
+
+            .login-box { margin-right: 0.5rem !important; }
+            .member-link { font-size: 0.85rem; }
+            #aboutwe { font-size: 0.75rem; padding: 0.1rem 0.5rem; }
+            #footer { font-size: 0.8rem; padding: 14px 0; }
+        }
     </style>
 </head>
 
@@ -177,11 +196,11 @@
 
 <header class="container-fluid border-bottom">
     <div class="row align-items-center py-2">
-        <div class="col-4 ps-4">
+        <div class="col-6 col-md-4 ps-4">
             <h4 class="mb-0"><span class="logo-text">Logo</span> 骨架偵測</h4>
         </div>
 
-        <div class="col-8 d-flex justify-content-end align-items-center pe-4">
+        <div class="col-6 col-md-8 d-flex justify-content-end align-items-center pe-4">
             <div class="login-box me-4">
             <!-- 修正 1：去 session 裡面檢查 loggedIn 狀態 -->
             {% if not session.get('loggedIn') %}
@@ -194,7 +213,7 @@
                     </a>
                     <ul class="dropdown-menu shadow">
                         <li><a class="dropdown-item" href="/renaissance">記錄管理</a></li>
-                        <li><a class="dropdown-item" href="#">個人檔案</a></li>
+                        <li><a class="dropdown-item" href="/profileHome">個人檔案</a></li>
                         <li><hr class="dropdown-divider"></li>
                         <!-- 修正 3：綁定我們剛剛寫好的 /logout 路由 -->
                         <li><a class="dropdown-item" href="/logout">登出</a></li>
@@ -203,12 +222,12 @@
             {% endif %}
             </div>
 
-            <div class="d-flex align-items-center me-3">
+            <div class="d-none d-md-flex align-items-center me-3">
                 <a id="aboutwe" class="btn btn-outline-light btn-sm" href="#">關於我們</a>
                 <i class="bi bi-globe2 ms-2 text-light"></i>
             </div>
                 
-            <form class="d-flex search-form align-items-center" action="/search" method="get">
+            <form class="d-none d-md-flex search-form align-items-center" action="/search" method="get">
                 <div class="input-group input-group-sm">
                     <input type="search" name="searchQuery" class="form-control" placeholder="Please search...">
                     <button class="btn btn-outline-secondary p-0 ms-2 border-0" type="submit">
@@ -220,9 +239,12 @@
     </div>      
 </header>
 
-<nav class="navbar navbar-expand-lg shadow-sm">
+<nav class="navbar navbar-expand-sm navbar-dark shadow-sm">
     <div class="container-fluid p-0">
-        <div class="collapse navbar-collapse justify-content-start" id="nav-menu">
+        <button class="navbar-toggler ms-3 my-2" type="button" data-bs-toggle="collapse" data-bs-target="#nav-menu-record" aria-controls="nav-menu-record" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse justify-content-start" id="nav-menu-record">
             <ul class="navbar-nav ps-4">
                 <li class="nav-item"><a href="/" class="nav-link">首頁</a></li>
                 <li class="nav-item"><a href="/ScanPage" class="nav-link">骨架偵測</a></li>
@@ -250,12 +272,12 @@
 
         <div class="filter-section">
             <form class="row g-3 align-items-center">
-                <div class="col-md-4 d-flex align-items-center">
+                <div class="col-12 col-md-4 d-flex align-items-center">
                     <input type="datetime-local" class="form-control form-control-sm me-2" value="2026-07-01T00:00">
                     <span class="text-white-50">~</span>
                     <input type="datetime-local" class="form-control form-control-sm ms-2" value="2026-07-07T23:59">
                 </div>
-                <div class="col-md-2">
+                <div class="col-12 col-md-2">
                     <select class="form-select form-select-sm">
                         <option value="all" selected>全部分組 (姿勢)</option>
                         <option value="good">端正坐姿</option>
@@ -265,14 +287,14 @@
                     </select>
                 </div>
 
-                <div class="col-md-3">
+                <div class="col-12 col-md-3">
                     <div class="input-group input-group-sm">
                         <span class="input-group-text bg-transparent border-secondary text-secondary"><i class="bi bi-search"></i></span>
                         <input type="text" class="form-control" placeholder="紀錄 ID 或 備註關鍵字">
                     </div>
                 </div>
 
-                <div class="col-md-3 text-end">
+                <div class="col-12 col-md-3 text-md-end mt-2 mt-md-0">
                     <button type="submit" class="btn btn-primary btn-sm px-3 me-2">查詢</button>
                     <button type="reset" class="btn btn-outline-secondary btn-sm px-3 me-2">重置</button>
                     <button type="button" class="btn btn-outline-light btn-sm px-3"><i class="bi bi-gear"></i> 欄位設定</button>

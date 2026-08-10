@@ -2,6 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI 坐姿即時監測</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
@@ -107,13 +108,18 @@
         .video-box {
             margin: 0;
             width: 100%;
-            min-height: 480px; 
-            height: 100%;
             background-color: #050505;
             border: 1px solid rgba(255, 255, 255, 0.15); 
             border-radius: 8px; 
             position: relative;
             overflow: hidden;
+        }
+
+        @media (min-width: 992px) {
+            .video-box {
+                min-height: 480px;
+                height: 100%;
+            }
         }
 
         #placeholder {
@@ -157,17 +163,72 @@
         ::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.3); }
         ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.4); }
+
+        /* --- 手機適配 --- */
+        @media (max-width: 767.98px) {
+            h1 { font-size: 1.5rem; }
+
+            .controls-wrapper { margin-bottom: 20px; }
+
+            .controls {
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 10px;
+                padding: 14px 16px;
+            }
+
+            .controls label {
+                width: 100%;
+                text-align: center;
+                margin-right: 0;
+                margin-bottom: 4px;
+            }
+
+            select, button {
+                font-size: 14px;
+                padding: 8px 14px;
+                margin: 0;
+            }
+
+            .glass-panel { padding: 14px !important; }
+
+            .glass-panel h5 { font-size: 1rem; }
+
+            .ai-prompt-box .fs-3 { font-size: 1.5rem !important; }
+
+            .login-box { margin-right: 0.5rem !important; }
+
+            .member-link { font-size: 0.85rem; }
+
+            #aboutwe { font-size: 0.75rem; padding: 0.1rem 0.5rem; }
+
+            .video-box {
+                height: auto;
+                flex-grow: 0;
+            }
+
+            #videoStream {
+                height: auto;
+                display: block;
+            }
+
+            #placeholder {
+                aspect-ratio: 4 / 3;
+                height: auto;
+            }
+        }
     </style>
 </head>
 <body>
 
 <header class="container-fluid border-bottom">
     <div class="row align-items-center py-2">
-        <div class="col-4 ps-4">
+        <div class="col-6 col-md-4 ps-4">
             <h4 class="mb-0"><span class="logo-text">Logo</span> 骨架偵測</h4>
         </div>
 
-        <div class="col-8 d-flex justify-content-end align-items-center pe-4">
+        <div class="col-6 col-md-8 d-flex justify-content-end align-items-center pe-4">
             
             <div class="login-box me-4">
             <!-- 修正 1：去 session 裡面檢查 loggedIn 狀態 -->
@@ -181,7 +242,7 @@
                     </a>
                     <ul class="dropdown-menu shadow">
                         <li><a class="dropdown-item" href="/renaissance">記錄管理</a></li>
-                        <li><a class="dropdown-item" href="#">個人檔案</a></li>
+                        <li><a class="dropdown-item" href="/profileHome">個人檔案</a></li>
                         <li><hr class="dropdown-divider"></li>
                         <!-- 修正 3：綁定我們剛剛寫好的 /logout 路由 -->
                         <li><a class="dropdown-item" href="/logout">登出</a></li>
@@ -190,12 +251,12 @@
             {% endif %}
             </div>
 
-            <div class="d-flex align-items-center me-3">
+            <div class="d-none d-md-flex align-items-center me-3">
                 <a id="aboutwe" class="btn btn-outline-light btn-sm" href="#">關於我們</a>
                 <i class="bi bi-globe2 ms-2 text-light"></i>
             </div>
                 
-            <form class="d-flex search-form align-items-center" action="/search" method="get">
+            <form class="d-none d-md-flex search-form align-items-center" action="/search" method="get">
                 <div class="input-group input-group-sm">
                     <input type="search" name="searchQuery" class="form-control" placeholder="Please search...">
                     <button class="btn btn-outline-secondary p-0 ms-2 border-0" type="submit">
@@ -207,8 +268,11 @@
     </div>      
 </header>
 
-<nav class="navbar navbar-expand-lg shadow-sm">
+<nav class="navbar navbar-expand-sm navbar-dark shadow-sm">
     <div class="container-fluid p-0">
+        <button class="navbar-toggler ms-3 my-2" type="button" data-bs-toggle="collapse" data-bs-target="#nav-menu" aria-controls="nav-menu" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
         <div class="collapse navbar-collapse justify-content-start" id="nav-menu">
             <ul class="navbar-nav ps-4">
                 <li class="nav-item"><a href="/" class="nav-link">首頁</a></li>

@@ -1,35 +1,391 @@
-<!DOCTYPE HTML>
-<html>
-
+<!DOCTYPE html>
+<html lang="zh-TW">
 <head>
-	<title>Profile Home</title>
-	<link rel="stylesheet" href={{ url_for('static', filename='css/profileHome.css' ) }} />
-	<link rel="stylesheet" href={{ url_for('static', filename='css/topStyle.css' ) }} />
-	<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
-</head>
+    <title>個人檔案 - YOLO坐姿偵測系統</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <!-- 引入 Bootstrap 與我們統一樣式的 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/all.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/navbar.css') }}" />
 
+    <style>
+        body {
+            background: linear-gradient(135deg, #1e2430 0%, #0f1319 100%);
+            min-height: 100vh;
+            color: white;
+            font-family: 'Helvetica Neue', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header, .navbar {
+            background-color: rgba(30, 40, 55, 0.7) !important;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+        }
+
+        .nav-link, .member-link, header h4, .dropdown-toggle {
+            color: #ecf0f1 !important;
+            font-weight: 500;
+            transition: color 0.3s ease;
+        }
+
+        .nav-link:hover, .member-link:hover, .dropdown-toggle:hover {
+            color: #3b82f6 !important;
+        }
+
+        .dropdown-menu {
+            background-color: rgba(30, 40, 55, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .dropdown-item {
+            color: #ecf0f1;
+        }
+
+        .dropdown-item:hover {
+            background-color: #2c3e50;
+            color: white;
+        }
+
+        .dropdown-divider {
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .search-form input {
+            background-color: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        .search-form input:focus {
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 0.25rem rgba(59, 130, 246, 0.25);
+        }
+
+        .search-form input::placeholder {
+            color: #8c98a4;
+        }
+
+        .main-container {
+            flex: 1;
+            padding: 40px 0;
+            max-width: 1200px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        /* 統一的毛玻璃卡片風格 */
+        .glass-card {
+            background-color: rgba(30, 40, 55, 0.6);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+            height: 100%;
+        }
+
+        /* ================= 左側：個人資料區 ================= */
+        .profile-avatar-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 25px;
+        }
+
+        .profile-avatar {
+            width: 160px;
+            height: 160px;
+            border-radius: 50%;
+            /* 淡色背景，配合您的設計圖 */
+            background: linear-gradient(135deg, #a8c0ff 0%, #3f2b96 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+            font-weight: bold;
+            color: white;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+            margin-bottom: 20px;
+            border: 4px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .profile-name {
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: #ecf0f1;
+            letter-spacing: 1px;
+            margin-bottom: 5px;
+        }
+
+        .profile-info-list {
+            list-style: none;
+            padding: 0;
+            width: 100%;
+            margin-top: 20px;
+        }
+
+        .profile-info-list li {
+            padding: 12px 15px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.95rem;
+        }
+
+        .profile-info-list li:last-child {
+            border-bottom: none;
+        }
+
+        .info-label { color: #8c98a4; }
+        .info-value { color: #ecf0f1; font-weight: 500; }
+
+        .profile-actions {
+            display: flex;
+            gap: 15px;
+            margin-top: 25px;
+            width: 100%;
+        }
+
+        .btn-glass {
+            flex: 1;
+            text-align: center;
+            text-decoration: none;
+            padding: 10px;
+            border-radius: 8px;
+            background-color: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: all 0.3s ease;
+        }
+
+        .btn-glass:hover {
+            background-color: #3b82f6;
+            border-color: #3b82f6;
+            color: white;
+            transform: translateY(-2px);
+        }
+
+        /* ================= 右側：紀錄與圖表區 ================= */
+        .recent-records-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .record-item {
+            background-color: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 18px 25px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #a0aec0;
+            font-size: 1.1rem;
+            letter-spacing: 1px;
+            transition: background-color 0.3s ease;
+        }
+        
+        .record-item:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .chart-container {
+            flex: 1;
+            background-color: rgba(255, 255, 255, 0.03);
+            border: 1px dashed rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 250px;
+            color: #64748b;
+            font-size: 1.2rem;
+            letter-spacing: 2px;
+        }
+
+        /* 頁尾 */
+        #footer {
+            text-align: center;
+            color: #64748b;
+            padding: 20px 0;
+            font-size: 0.9rem;
+            letter-spacing: 1px;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            margin-top: auto;
+        }
+
+        /* --- 手機適配 --- */
+        @media (max-width: 767.98px) {
+            .glass-card { padding: 20px 16px; }
+
+            .profile-avatar {
+                width: 120px;
+                height: 120px;
+                font-size: 2rem;
+            }
+
+            .profile-name { font-size: 1.4rem; }
+
+            .profile-info-list li { font-size: 0.9rem; padding: 10px 12px; }
+
+            .profile-actions { flex-direction: column; gap: 10px; }
+
+            .record-item { padding: 14px 18px; font-size: 0.95rem; }
+
+            .chart-container { min-height: 180px; font-size: 1rem; }
+
+            .login-box { margin-right: 0.5rem !important; }
+            .member-link { font-size: 0.85rem; }
+            #aboutwe { font-size: 0.75rem; padding: 0.1rem 0.5rem; }
+            #footer { font-size: 0.8rem; padding: 14px 0; }
+        }
+    </style>
+</head>
 <body>
-	<div class="displayCategory">
-		<nav class="category-navbar">
-		</nav>
-	</div>
-	<div class="display" id="userdata">
-		<h1>會員資料</h1>
-		<hr>
-		<p>Email: <span>{{profileData[0]}}</span></p>
-		<p>電話號碼: <span>{{profileData[1]}}</span></p>
-		<p>名字: <span>{{profileData[2]}}</span></p>
-		<p>姓氏: <span>{{profileData[3]}}</span></p>
-		<p>體重: <span>{{profileData[5]}}</span></p>
-		<p>身高: <span>{{profileData[6]}}</span></p>
-		<div style="margin-top: 24px;">
-			<a href="{{ url_for('editProfile') }}" class="btn-edit">修改資料</a>
-			<a href="{{ url_for('changePassword') }}" class="btn-edit">修改密碼</a>
-		</div>
-	</div>
-</body>
+
+<!-- 導覽列與 header (沿用您的 navbar 設計) -->
+<header class="container-fluid border-bottom">
+    <div class="row align-items-center py-2">
+        <div class="col-6 col-md-4 ps-4">
+            <h4 class="mb-0"><span class="logo-text">Logo</span> 骨架偵測</h4>
+        </div>
+        <div class="col-6 col-md-8 d-flex justify-content-end align-items-center pe-4">
+            <div class="login-box me-4">
+                {% if not session.get('loggedIn') %}
+                    <a href="/loginForm" class="member-link text-decoration-none">會員登入</a>
+                {% else %}
+                    <div class="dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">Hello, {{ session.get('firstName') }}</a>
+                        <ul class="dropdown-menu shadow">
+                            <li><a class="dropdown-item" href="/renaissance">記錄管理</a></li>
+                            <li><a class="dropdown-item" href="/profileHome">個人檔案</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="/logout">登出</a></li>
+                        </ul>
+                    </div>
+                {% endif %}
+            </div>
+            <div class="d-none d-md-flex align-items-center me-3">
+                <a class="btn btn-outline-light btn-sm" href="#">關於我們</a>
+            </div>
+        </div>  
+    </div>      
+</header>
+
+<nav class="navbar navbar-expand-sm navbar-dark shadow-sm">
+    <div class="container-fluid p-0">
+        <button class="navbar-toggler ms-3 my-2" type="button" data-bs-toggle="collapse" data-bs-target="#nav-menu-profile" aria-controls="nav-menu-profile" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse justify-content-start" id="nav-menu-profile">
+            <ul class="navbar-nav ps-4">
+                <li class="nav-item"><a href="/" class="nav-link">首頁</a></li>
+                <li class="nav-item"><a href="/ScanPage" class="nav-link">骨架偵測</a></li>
+                {% if session.role == 'admin' %}
+                    <li class="nav-item"><a href="/renaissance" class="nav-link">姿勢紀錄</a></li>
+                    <li class="nav-item"><a href="/analysis" class="nav-link">數據分析</a></li>
+                {% endif %}
+                <li class="nav-item"><a href="/rank" class="nav-link">高風險姿勢排行</a></li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<!-- 個人檔案雙欄主內容區 -->
+<div class="main-container px-4">
+    <div class="row g-4 h-100">
+        
+        <!-- 左側：頭像與基本資料 -->
+        <div class="col-lg-4">
+            <div class="glass-card d-flex flex-column">
+                <div class="profile-avatar-container">
+                    <!-- 自動截取姓氏與名字的前兩個字 (若資料存在) -->
+                    <div class="profile-avatar">
+                        {% if profileData %}
+                            {{ (profileData[3] ~ profileData[2])[:2] }}
+                        {% else %}
+                            User
+                        {% endif %}
+                    </div>
+                    <div class="profile-name">
+                        {% if profileData %}
+                            {{ profileData[3] }}{{ profileData[2] }}
+                        {% else %}
+                            User Name
+                        {% endif %}
+                    </div>
+                </div>
+
+                <hr style="border-color: rgba(255,255,255,0.1); width: 100%; margin: 0;">
+
+                <!-- 詳細資料清單 -->
+                <ul class="profile-info-list">
+                    <li>
+                        <span class="info-label">Email</span>
+                        <span class="info-value">{{ profileData[0] if profileData else '載入中...' }}</span>
+                    </li>
+                    <li>
+                        <span class="info-label">電話號碼</span>
+                        <span class="info-value">{{ profileData[1] if profileData else '載入中...' }}</span>
+                    </li>
+                    <li>
+                        <span class="info-label">身高</span>
+                        <span class="info-value">{{ profileData[6] if profileData else '--' }} cm</span>
+                    </li>
+                    <li>
+                        <span class="info-label">體重</span>
+                        <span class="info-value">{{ profileData[5] if profileData else '--' }} kg</span>
+                    </li>
+                </ul>
+
+                <div class="profile-actions mt-auto">
+                    <a href="{{ url_for('editProfile') }}" class="btn-glass">修改資料</a>
+                    <a href="{{ url_for('changePassword') }}" class="btn-glass">修改密碼</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右側：姿勢紀錄與數據分析圖表 -->
+        <div class="col-lg-8">
+            <div class="glass-card d-flex flex-column">
+                
+                <!-- 近 3 筆姿勢紀錄 -->
+                <div class="recent-records-container">
+                    <div class="record-item">近 3 筆姿勢紀錄 (資料串接中...)</div>
+                    <div class="record-item">近 3 筆姿勢紀錄 (資料串接中...)</div>
+                    <div class="record-item">近 3 筆姿勢紀錄 (資料串接中...)</div>
+                </div>
+
+                <!-- 線性表格區塊 (預留空間) -->
+                <div class="chart-container mt-2">
+                    <div class="text-center">
+                        <i class="bi bi-graph-up text-primary mb-2" style="font-size: 2rem;"></i>
+                        <p class="mb-0">用戶數據線性表格 (Chart.js 預留區)</p>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+</div>
+
 <footer id="footer">
-	<p>&copy; 最終解釋權與所有權歸製作者所有</p>
+    <p class="mb-0">&copy; 最終解釋權與所有權歸製作者所有</p>
 </footer>
 
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
 </html>

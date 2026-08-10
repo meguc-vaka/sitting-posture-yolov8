@@ -157,6 +157,66 @@
             align-items: center;
             justify-content: center;
         }
+
+        /* --- 手機適配 --- */
+        @media (max-width: 767.98px) {
+            .page-header { padding: 16px; margin-bottom: 24px; }
+            .page-header h2 { font-size: 1.2rem; }
+
+            .timeline-wrapper {
+                padding-left: 48px;
+            }
+
+            .timeline-wrapper::before {
+                left: 22px;
+            }
+
+            .rank-circle {
+                left: -48px;
+                width: 40px;
+                height: 40px;
+                font-size: 18px;
+                border-width: 3px;
+            }
+
+            .rank-card {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+                padding: 16px;
+            }
+
+            .rank-card:hover { transform: none; }
+
+            .posture-name {
+                flex: none;
+                border-right: none;
+                border-bottom: 1px solid rgba(255,255,255,0.1);
+                padding-right: 0;
+                padding-bottom: 8px;
+                width: 100%;
+            }
+
+            .posture-desc { font-size: 0.85rem; padding: 0; }
+
+            .posture-count { font-size: 0.85rem; padding: 6px 14px; }
+
+            .posture-percent {
+                width: 48px;
+                height: 48px;
+                font-size: 0.85rem;
+                align-self: center;
+            }
+
+            .posture-percent::after {
+                width: 36px;
+                height: 36px;
+            }
+
+            .login-box { margin-right: 0.5rem !important; }
+            .member-link { font-size: 0.85rem; }
+            #aboutwe { font-size: 0.75rem; padding: 0.1rem 0.5rem; }
+        }
     </style>
 </head>
 <body>
@@ -164,10 +224,10 @@
 <!-- 導覽列與 header (沿用您的 navbar 設計) -->
 <header class="container-fluid border-bottom" style="position: relative; z-index: 1050 !important;">
     <div class="row align-items-center py-2">
-        <div class="col-4 ps-4">
+        <div class="col-6 col-md-4 ps-4">
             <h4 class="mb-0"><span class="logo-text">Logo</span> 骨架偵測</h4>
         </div>
-        <div class="col-8 d-flex justify-content-end align-items-center pe-4">
+        <div class="col-6 col-md-8 d-flex justify-content-end align-items-center pe-4">
             <div class="login-box me-4">
                 {% if not session.get('loggedIn') %}
                     <a href="/loginForm" class="member-link text-decoration-none">會員登入</a>
@@ -176,23 +236,26 @@
                         <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">Hello, {{ session.get('firstName') }}</a>
                         <ul class="dropdown-menu shadow">
                             <li><a class="dropdown-item" href="/renaissance">記錄管理</a></li>
-                            <li><a class="dropdown-item" href="#">個人檔案</a></li>
+                            <li><a class="dropdown-item" href="/profileHome">個人檔案</a></li>
                             <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="/logout">登出</a></li>
                         </ul>
                     </div>
                 {% endif %}
             </div>
-            <div class="d-flex align-items-center me-3">
+            <div class="d-none d-md-flex align-items-center me-3">
                 <a class="btn btn-outline-light btn-sm" href="#">關於我們</a>
             </div>
         </div>  
     </div>      
 </header>
 
-<nav class="navbar navbar-expand-lg navbar-dark shadow-sm">
+<nav class="navbar navbar-expand-sm navbar-dark shadow-sm">
     <div class="container-fluid p-0">
-        <div class="collapse navbar-collapse justify-content-start" id="nav-menu">
+        <button class="navbar-toggler ms-3 my-2" type="button" data-bs-toggle="collapse" data-bs-target="#nav-menu-rank" aria-controls="nav-menu-rank" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse justify-content-start" id="nav-menu-rank">
             <ul class="navbar-nav ps-4">
                 <li class="nav-item"><a href="/" class="nav-link">首頁</a></li>
                 <li class="nav-item"><a href="/ScanPage" class="nav-link">骨架偵測</a></li>
