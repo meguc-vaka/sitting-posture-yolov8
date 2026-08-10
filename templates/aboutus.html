@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <title>關於我們 - YOLO坐姿偵測系統</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/all.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/navbar.css') }}" />
+
+    <style>
+        body {
+            background: linear-gradient(135deg, #1e2430 0%, #0f1319 100%);
+            min-height: 100vh;
+            color: white;
+            font-family: 'Helvetica Neue', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .main-container {
+            flex: 1;
+            padding: 50px 0;
+            max-width: 1200px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        /* 頁面標題區塊 */
+        .page-header {
+            text-align: center;
+            margin-bottom: 50px;
+        }
+        
+        .page-header h2 {
+            font-weight: bold;
+            letter-spacing: 2px;
+            color: #ecf0f1;
+        }
+
+        .page-header p {
+            color: #8c98a4;
+            font-size: 1.1rem;
+        }
+
+        /* 團隊成員卡片 (毛玻璃效果) */
+        .glass-card {
+            background-color: rgba(30, 40, 55, 0.6);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 30px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .glass-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 15px 35px rgba(0,0,0,0.4);
+        }
+
+        /* 頭像預留區塊 (對應您設計圖上方的方形區塊) */
+        .avatar-placeholder {
+            width: 100%;
+            aspect-ratio: 1 / 1; /* 保持正方形 */
+            background: linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.01));
+            border: 2px dashed rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: rgba(255, 255, 255, 0.3);
+            font-size: 1.2rem;
+            letter-spacing: 2px;
+        }
+
+        /* 介紹內容區塊 (對應您設計圖下方的文字區塊) */
+        .member-info {
+            width: 100%;
+            text-align: center;
+            flex: 1; /* 讓文字區塊填滿剩餘高度 */
+        }
+
+        .member-name {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #ecf0f1;
+            margin-bottom: 5px;
+        }
+
+        .member-role {
+            color: #3b82f6;
+            font-size: 0.95rem;
+            margin-bottom: 15px;
+            font-weight: 500;
+        }
+
+        .member-desc {
+            color: #a0aec0;
+            font-size: 0.95rem;
+            line-height: 1.6;
+            text-align: justify;
+        }
+
+        /* 頁尾 */
+        #footer {
+            text-align: center;
+            color: #64748b;
+            padding: 20px 0;
+            font-size: 0.9rem;
+            letter-spacing: 1px;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            margin-top: auto;
+        }
+    </style>
+</head>
+<body>
+
+<!-- 導覽列與 header (沿用您的 navbar 設計) -->
+<header class="container-fluid border-bottom">
+    <div class="row align-items-center py-2">
+        <div class="col-4 ps-4">
+            <h4 class="mb-0"><span class="logo-text">Logo</span> 骨架偵測</h4>
+        </div>
+        <div class="col-8 d-flex justify-content-end align-items-center pe-4">
+            <div class="login-box me-4">
+                {% if not session.get('loggedIn') %}
+                    <a href="/loginForm" class="member-link text-decoration-none">會員登入</a>
+                {% else %}
+                    <div class="dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">Hello, {{ session.get('firstName') }}</a>
+                        <ul class="dropdown-menu shadow">
+                            <li><a class="dropdown-item" href="/renaissance">記錄管理</a></li>
+                            <li><a class="dropdown-item" href="/profileHome">個人檔案</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="/logout">登出</a></li>
+                        </ul>
+                    </div>
+                {% endif %}
+            </div>
+            <div class="d-flex align-items-center me-3">
+                <a class="btn btn-outline-light btn-sm" href="/about">關於我們</a>
+            </div>
+        </div>  
+    </div>      
+</header>
+
+<nav class="navbar navbar-expand-lg navbar-dark shadow-sm">
+    <div class="container-fluid p-0">
+        <div class="collapse navbar-collapse justify-content-start" id="nav-menu">
+            <ul class="navbar-nav ps-4">
+                <li class="nav-item"><a href="/" class="nav-link">首頁</a></li>
+                <li class="nav-item"><a href="/ScanPage" class="nav-link">骨架偵測</a></li>
+                {% if session.role == 'admin' %}
+                    <li class="nav-item"><a href="/renaissance" class="nav-link">姿勢紀錄</a></li>
+                    <li class="nav-item"><a href="/analysis" class="nav-link">數據分析</a></li>
+                {% endif %}
+                <li class="nav-item"><a href="/rank" class="nav-link">高風險姿勢排行</a></li>
+            </ul>
+        </div>
+    </div>
+</nav>
+
+<!-- 關於我們主內容區 -->
+<div class="main-container px-4">
+    
+    <div class="page-header">
+        <h2>關於我們</h2>
+        <p>致力於用科技守護您的脊椎健康</p>
+    </div>
+
+    <!-- Bootstrap 的 Grid 系統，g-4 代表卡片之間的間距 -->
+    <div class="row g-4">
+        
+        <!-- 卡片 1 -->
+        <div class="col-12 col-md-4">
+            <div class="glass-card">
+                <div class="avatar-placeholder">
+                    <span>照片預留區</span>
+                </div>
+                <div class="member-info">
+                    <div class="member-name">香蕉</div>
+                    <div class="member-role">前端開發 / UI 設計blablabla(example)</div>
+                    <div class="member-desc">
+                        這裡可以放簡短的自我介紹或負責的工作內容。目前暫時用假字排版，等專案完成後再來填寫詳細的文字。
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 卡片 2 -->
+        <div class="col-12 col-md-4">
+            <div class="glass-card">
+                <div class="avatar-placeholder">
+                    <span>照片預留區</span>
+                </div>
+                <div class="member-info">
+                    <div class="member-name">芒果</div>
+                    <div class="member-role">後端架構 / 資料庫設計blablabla(example)</div>
+                    <div class="member-desc">
+                        這裡可以放簡短的自我介紹或負責的工作內容。目前暫時用假字排版，等專案完成後再來填寫詳細的文字。
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 卡片 3 -->
+        <div class="col-12 col-md-4">
+            <div class="glass-card">
+                <div class="avatar-placeholder">
+                    <span>照片預留區</span>
+                </div>
+                <div class="member-info">
+                    <div class="member-name">鳳梨</div>
+                    <div class="member-role">AI 模型 / 演算法整合blablabla(example)</div>
+                    <div class="member-desc">
+                        這裡可以放簡短的自我介紹或負責的工作內容。目前暫時用假字排版，等專案完成後再來填寫詳細的文字。
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<footer id="footer">
+    <p class="mb-0">&copy; 最終解釋權與所有權歸製作者所有</p>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

@@ -53,6 +53,10 @@ def scanpage():
 def login_form():
     return render_template('login.html')
 
+@app.route('/about')
+def about():
+    return render_template('aboutus.html')
+
 # === 寫入並重置坐姿紀錄 ===
 def insert_posture_record_if_any():
     """把當前聚合計數寫入 posture_records 表，寫完後清零並重置計時器。
