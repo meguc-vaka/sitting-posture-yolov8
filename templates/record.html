@@ -303,7 +303,15 @@
                         <td>{{ row.offset }}</td>
                         <td>{{ row.angle }}</td>
                         <td class="text-white-50">{{ row.note }}</td>
-                        <td><a href="#" class="text-primary text-decoration-none">查看截圖</a></td>
+                        <td>
+                            {% if row.image_url %}
+                                <a href="{{ row.image_url }}" target="_blank" class="text-primary text-decoration-none">
+                                    <i class="bi bi-image"></i> 查看截圖
+                                </a>
+                            {% else %}
+                                <span class="text-muted">無截圖</span>
+                            {% endif %}
+                        </td>
                     </tr>
                     {% else %}
 

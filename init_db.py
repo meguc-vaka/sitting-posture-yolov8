@@ -37,7 +37,7 @@ def init_db():
     END;
     """)
     
-    # 建立預設的超級管理員帳號 (密碼為 admin123)
+    # 建立預設的管理員帳號 (密碼為 admin123)
     admin_pw = hashlib.md5("admin123".encode()).hexdigest()
     cursor.execute('''
         INSERT INTO users (email, password, firstName, isAdmin) 
@@ -55,14 +55,15 @@ def init_db():
     cursor.execute('DROP TABLE IF EXISTS PoseRecordData')
     cursor.execute('''
         CREATE TABLE PoseRecordData (
-        record_id TEXT PRIMARY KEY,           -- 圖片為 varchar(36)，建議儲存 UUID 字串
+        record_id TEXT PRIMARY KEY,           -- 單筆紀錄 ID
         user_id TEXT NOT NULL,                -- 紀錄所屬的使用者 ID
-        admin_id INTEGER,                     -- 若有管理員審閱，則紀錄管理員 ID
-        timestamp TEXT,                       -- SQLite 中 datetime 通常存為 TEXT (ISO8601)
-        posture_type TEXT,                    -- 姿勢類型 (如: 駝背)
-        angle_deviation REAL,                 -- 浮點數在 SQLite 中使用 REAL
-        is_abnormal INTEGER,                  -- 布林值在 SQLite 中使用 INTEGER (0 或 1)
-        alert_message TEXT,
+        admin_id INTEGER,                     -- 審閱管理員 ID
+        timestamp TEXT,                       -- 事件發生時間
+        posture_type TEXT,                    -- 姿勢類型 (如: 駝背、烏龜頸、挺直)
+        angle_deviation REAL,                 -- 角度偏離值(浮點數在 SQLite 中使用 REAL)
+        is_abnormal INTEGER,                  -- 是否異常(布林值在 SQLite 中使用 INTEGER (0 或 1))
+        alert_message TEXT,                   -- 警示訊息：系統發出的提醒文字
+        image_path TEXT NULL,                 -- 坐姿截圖
         FOREIGN KEY (admin_id) REFERENCES users (userId) -- ★ 關聯已更新到 users 表
     )
     ''')
@@ -90,7 +91,8 @@ def init_db():
         turtle_neck_count INTEGER NOT NULL DEFAULT 0,
         looking_down_count INTEGER NOT NULL DEFAULT 0,
         slouching_count INTEGER NOT NULL DEFAULT 0,
-        timestamp TEXT NOT NULL
+        timestamp TEXT NOT NULL,
+        image_path TEXT NULL
     )
     ''')
 

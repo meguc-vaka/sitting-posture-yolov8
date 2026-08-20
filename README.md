@@ -19,6 +19,23 @@
   -> 指令 B: pip install -U ultralytics
         (建議 ultralytics==8.4.95)
 
+[補充說明] PyTorch 顯卡加速版本切換 (選用 💡)
+--------------------------------------------------------------------
+* 預設 requirements.txt 通常為純 CPU 版本。若您的電腦配有獨立顯卡，
+  可依據硬體手動切換 PyTorch 版本以大幅提升 YOLO 推論效能：
+
+  [選項 A] NVIDIA 顯卡加速 (以 CUDA 12.1 為例)
+  --------------------------------------------------
+  * 需求條件: NVIDIA 獨立顯卡 (建議 GTX 1060 / GTX 1650 以上)
+  * 安裝指令:
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+  [選項 B] AMD 顯卡加速 (Windows DirectML 架構)
+  --------------------------------------------------
+  * 需求條件: AMD 獨立顯卡 (建議 RX 580 / RX 5500 以上)
+  * 安裝指令:
+    pip install torch==2.4.1 torchvision==0.19.1 torch-directml
+
 
 [步驟 3] 啟動應用程式
 --------------------------------------------------------------------

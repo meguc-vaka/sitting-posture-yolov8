@@ -1,4 +1,4 @@
-import base64, hashlib, math, smtplib, sqlite3, threading, time, traceback
+import base64, hashlib, math, smtplib, threading, time, traceback, os ,sys ,signal
 from collections import deque
 from email.header import Header
 from email.mime.multipart import MIMEMultipart
@@ -6,18 +6,32 @@ from email.mime.text import MIMEText
 
 import cv2
 import numpy as np
-from flask import Flask, redirect, render_template, request, session, url_for
-from flask_apscheduler import APScheduler
+from flask import Flask, redirect, render_template, request, session, url_for, request
 from flask_socketio import SocketIO, emit
+from flask_apscheduler import APScheduler
 
 from controllers.controller import Controller
+from collections import defaultdict
 from db import init_db, query_db, execute_db
 from models.load_model import Model
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
 app.secret_key = 'secret_key_for_session' # 設定 Session 的加密金鑰
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+
+def graceful_exit(sig, frame):
+    print("\n正在停止排程器並退出...")
+    try:
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+    except Exception:
+        pass
+    os._exit(0)
+
+# 註冊中斷訊號
+signal.signal(signal.SIGINT, graceful_exit)
+signal.signal(signal.SIGTERM, graceful_exit)
 
 record_lock = threading.RLock()     # 全域只宣告一次鎖頭
 last_record_time = time.time()      # 紀錄初始時間
@@ -34,6 +48,8 @@ posture_history = deque(
 ) 
 last_warning_time = 0               # 記錄上一次發送 AI 警告的時間戳記
 COOLDOWN_SECONDS = 60               # 設定冷卻時間為 60 秒
+# 使用動態字典，自動支援任何新加入的姿勢類別
+posture_snapshots = {}
 
 DB_PATH = 'database.db'
 init_db()  # 啟動伺服器前自動檢查並建表
@@ -54,7 +70,7 @@ def login_form():
     return render_template('login.html')
 
 # === 寫入並重置坐姿紀錄 ===
-def insert_posture_record_if_any():
+def insert_posture_record_if_any(frame=None, image_dir="static/screenshots"):
     """把當前聚合計數寫入 posture_records 表，寫完後清零並重置計時器。
     若 total <= 0 則直接 return，不寫空記錄。
     注意：調用方應持有 record_lock（RLock，允許重入）。"""
@@ -64,18 +80,31 @@ def insert_posture_record_if_any():
     if total <= 0:
         return
 
-    now_ts = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+    now_struct = time.localtime()
+    now_ts = time.strftime('%Y-%m-%d %H:%M:%S', now_struct)
+    filename = time.strftime('%Y%m%d_%H%M%S.jpg', now_struct)
+
+    #now_ts = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+    if not os.path.exists(image_dir):
+        os.makedirs(image_dir)
+
+    image_path = os.path.join(image_dir, filename).replace('\\', '/')
     with record_lock:
         # 持鎖後再算一次，避免並發競態
         total2 = sum(posture_counts.values())
         if total2 <= 0:
             return
 
+        if frame is not None:
+            cv2.imwrite(image_path, frame)
+        else:
+            image_path = ""
+
         query = """
             INSERT INTO posture_records (
                 good_count, turtle_neck_count,
-                looking_down_count, slouching_count, timestamp
-            ) VALUES (?, ?, ?, ?, ?)
+                looking_down_count, slouching_count, timestamp, image_path
+            ) VALUES (?, ?, ?, ?, ?, ?)
         """
         args = (
             posture_counts['Good'],
@@ -83,6 +112,7 @@ def insert_posture_record_if_any():
             posture_counts['LookingDown'],
             posture_counts['Slouching'],
             now_ts,
+            image_path
         )
         execute_db(query, args)
 
@@ -123,7 +153,17 @@ def posture_record():
         elif row['slouching_count'] > 50:
             status = "癱坐前滑"
             badge = "badge-warning"
-            
+
+        row_dict = dict(row)
+        raw_path = row_dict.get('image_path')
+
+        raw_path = row['image_path'] if 'image_path' in row.keys() else None
+        image_url = None
+        if raw_path:
+            # 替換斜線，確保路徑開頭包含 '/'
+            clean_path = raw_path.replace('\\', '/')
+            image_url = '/' + clean_path if not clean_path.startswith('/') else clean_path
+        
         history_data.append({
             "id": row['id'],
             "time": row['timestamp'],
@@ -131,7 +171,8 @@ def posture_record():
             "badge_class": badge,
             "offset": f"烏龜頸: {row['turtle_neck_count']} 幀", 
             "angle": f"低頭: {row['looking_down_count']} 幀",
-            "note": f"良好姿勢共維持 {row['good_count']} 幀"
+            "note": f"良好姿勢共維持 {row['good_count']} 幀",
+            "image_url": image_url 
         })
 
     # 4. 將分頁所需的數據打包，一併傳給網頁
@@ -144,47 +185,51 @@ def posture_record():
 
 # 建立一個 WebSocket 接收通道，名稱叫做 'video_frame'
 #接收前端影像幀進行 AI 姿勢識別、骨架標記繪製、定期統計落庫與不良姿勢即時警告
+last_frame = None
+last_bad_frame = None
 @socketio.on('video_frame')
 def handle_frame(data):
-    global last_warning_time # 宣告我們要修改全域的冷卻時間變數
+    global last_warning_time, last_frame, posture_snapshots
     
     try:
-        # 前端傳來的是 Base64 字串，把逗號後面的純資料切出來並解碼
         encoded_data = data.split(',')[1]
         nparr = np.frombuffer(base64.b64decode(encoded_data), np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-        # 交給 Model 算數字與分類
         results = pose_model.predict(frame)
-        
-        # 完美接住模型丟出來的 6 個變數
         keypoints_dict, angle, posture_status, shoulder_to_hip_y, shoulder_width, shoulder_height_ratio = pose_model.get_results(results)
         
         if keypoints_dict is not None and angle is not None:
-            # 將大腦的判斷結果交給 Controller 畫圖
             Controller.draw_skeleton_and_angle(frame, keypoints_dict, angle, posture_status)
 
-            # === 3 分鐘聚合計數（與 AI 警告邏輯平行，互不干擾） ===
+            # 暫存最新畫面與當前姿勢的代表畫面
+            last_frame = frame.copy()
+            posture_snapshots[posture_status] = frame.copy()
+
+            # === 3 分鐘聚合計數 ===
             if posture_status in posture_counts:
                 with record_lock:
                     posture_counts[posture_status] += 1
                     if time.time() - last_record_time >= 180:
-                        insert_posture_record_if_any()
+                        # 1. 找出 3 分鐘內累積最多幀的「主要姿勢」
+                        dominant_posture = max(posture_counts, key=posture_counts.get)
+                        
+                        # 2. 取出該主要姿勢的照片（若無則降級使用 last_frame）
+                        target_frame = posture_snapshots.get(dominant_posture, last_frame)
+                        
+                        # 3. 寫入資料庫並存檔
+                        insert_posture_record_if_any(target_frame)
+                        
+                        # 4. 清空快照字典
+                        posture_snapshots.clear()
 
-            # 狀態追蹤與 AI 通報機制
-            # 判斷當下是否為不良姿勢 (非 Good 即為 True)
+            # 狀態追蹤與 AI 通報機制 (保持不變)
             is_bad_posture = (posture_status != "Good")
             posture_history.append(is_bad_posture)
             
-            # 如果記憶帶收集滿 30 幀，且其中有 25 幀以上都是不良姿勢 (確認是長期習慣，非偶然)
             if len(posture_history) == 30 and posture_history.count(True) >= 25:
                 current_time = time.time()
-                
-                # 檢查是否已經過了 60 秒的冷卻時間
                 if current_time - last_warning_time > COOLDOWN_SECONDS:
-                    
-                    # 根據不同的問題，準備對應的提示訊息 
-                    # (未來這裡可以改成把 posture_status 傳給 Gemini API 生成動態文本)
                     advice_message = ""
                     if posture_status == "TurtleNeck":
                         advice_message = "您的頸部似乎有些前傾囉！請試著深呼吸，將肩膀往後放鬆，下巴微收，保護您的頸椎。"
@@ -195,14 +240,11 @@ def handle_frame(data):
                     else:
                         advice_message = "系統偵測到您的坐姿需要調整囉，稍微伸展一下吧！"
                     
-                    # 透過 WebSocket 廣播給網頁，通道名稱為 'ai_alert'
                     emit('ai_alert', {'message': advice_message})
-                    
-                    # 刷新冷卻時間，並清空記憶帶重新計算
                     last_warning_time = current_time
                     posture_history.clear()
 
-        # 把畫好骨架的圖片壓縮並轉回 Base64，丟回前端
+        # 壓縮回傳前端
         ret, buffer = cv2.imencode('.jpg', frame)
         if ret:
             encoded_img = base64.b64encode(buffer).decode('utf-8')
@@ -214,27 +256,100 @@ def handle_frame(data):
 
 #處理 WebSocket 新連線
 @socketio.on('connect')
-def handle_connect():
+def handle_connect(auth=None):
     """重連時先將舊 session 的累計數據落庫，再重置所有會話狀態，避免跨 session 汙染。"""
-    global last_record_time, last_warning_time
+    global last_record_time, last_warning_time, last_frame, posture_snapshots
     with record_lock:
-        insert_posture_record_if_any()
+        if sum(posture_counts.values()) > 0:
+            dominant_posture = max(posture_counts, key=posture_counts.get)
+            target_frame = posture_snapshots.get(dominant_posture, last_frame)
+            insert_posture_record_if_any(target_frame)
         for k in posture_counts:
             posture_counts[k] = 0
         last_record_time = time.time()
+        posture_snapshots.clear()
+        last_frame = None
     # 清空 AI 警告的滑動窗口與冷卻計時器，新 session 從零開始
     posture_history.clear()
     last_warning_time = 0
 
 #處理 WebSocket 斷線：
+# === 斷線處理（配合 30 秒防閃斷機制）===
 @socketio.on('disconnect')
-def handle_disconnect():
+def handle_disconnect(*args):
     """尾部強制結算：關閉頁面時把未滿 180 秒的累計數據寫入庫。
     觸發條件：距離上次入庫超過 30 秒（避免閃斷刷新就觸發）。"""
-    global last_record_time
+    global last_record_time, last_frame, last_bad_frame, posture_snapshots
+    sid = request.sid
+
     with record_lock:
         if time.time() - last_record_time >= 30:
-            insert_posture_record_if_any()
+            if sum(posture_counts.values()) > 0:
+                dominant_posture = max(posture_counts, key=posture_counts.get)
+                target_frame = posture_snapshots.get(dominant_posture, last_frame)
+                insert_posture_record_if_any(target_frame)
+        
+        # 不論是否達到 30 秒落庫門檻，斷線時都徹底歸零狀態，避免殘留至下次連線
+        for k in posture_counts:
+            posture_counts[k] = 0
+        posture_snapshots.clear()
+        last_frame = None
+
+    # 清理 AI 滑動窗口與時長追蹤快取
+    posture_history.clear()
+    user_monitoring_sessions.pop(sid, None)
+    print(f"[{sid}] 離線結算完成，狀態已重置。")
+
+# 紀錄該連線的監測開始時間與預定時長 (可依 socket id 記錄)
+user_monitoring_sessions = {}
+
+@socketio.on('start_monitoring')
+def handle_start_monitoring(data):
+    """前端點擊確認開始時觸發：初始化/重置狀態"""
+    global last_record_time, last_warning_time, last_frame, posture_snapshots
+    sid = request.sid
+    duration_minutes = data.get('duration', 0)
+    
+    with record_lock:
+        # 重置計數器
+        for k in posture_counts:
+            posture_counts[k] = 0
+        last_record_time = time.time()
+        posture_snapshots.clear()
+        last_frame = None
+
+    posture_history.clear()
+    last_warning_time = 0
+    
+    # 紀錄該次會話設定
+    user_monitoring_sessions[sid] = {
+        'start_time': time.time(),
+        'target_duration': duration_minutes
+    }
+    print(f"[{sid}] 開始監測，預定時長: {duration_minutes} 分鐘")
+
+
+# === 手動停止 / 倒數時間到（主動結算）===
+@socketio.on('stop_monitoring')
+def handle_stop_monitoring():
+    """使用者點擊暫停或倒數時間到：直接落庫結算（不受 30 秒限制）"""
+    global last_record_time, last_frame, posture_snapshots
+    sid = request.sid
+
+    with record_lock:
+        if sum(posture_counts.values()) > 0:
+            dominant_posture = max(posture_counts, key=posture_counts.get)
+            target_frame = posture_snapshots.get(dominant_posture, last_frame)
+            insert_posture_record_if_any(target_frame)
+
+        for k in posture_counts:
+            posture_counts[k] = 0
+        posture_snapshots.clear()
+        last_frame = None
+
+    posture_history.clear()
+    user_monitoring_sessions.pop(sid, None)
+    print(f"[{sid}] 監測主動停止，數據已結算落庫。")
 
 #坐姿紀錄整理成圖表
 @app.route('/analysis')
@@ -529,7 +644,6 @@ def updateProfile():
         except Exception as e:
             msg = "Error occured"
         return redirect(url_for('editProfile'))
-
 
 if __name__ == '__main__':
     scheduler.init_app(app)
