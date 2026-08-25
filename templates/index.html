@@ -2,6 +2,7 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI 坐姿即時監測</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
@@ -13,11 +14,11 @@
 
 <header class="container-fluid border-bottom">
     <div class="row align-items-center py-2">
-        <div class="col-4 ps-4">
+        <div class="col-6 col-md-4 ps-4">
             <h4 class="mb-0"><span class="logo-text">Logo</span> 骨架偵測</h4>
         </div>
 
-        <div class="col-8 d-flex justify-content-end align-items-center pe-4">
+        <div class="col-6 col-md-8 d-flex justify-content-end align-items-center pe-4">
             
             <div class="login-box me-4">
             <!-- 修正 1：去 session 裡面檢查 loggedIn 狀態 -->
@@ -40,12 +41,12 @@
             {% endif %}
             </div>
 
-            <div class="d-flex align-items-center me-3">
-                <a id="aboutwe" class="btn btn-outline-light btn-sm" href="#">關於我們</a>
+            <div class="d-none d-md-flex align-items-center me-3">
+                <a id="aboutwe" class="btn btn-outline-light btn-sm" href="/aboutus">關於我們</a>
                 <i class="bi bi-globe2 ms-2 text-light"></i>
             </div>
                 
-            <form class="d-flex search-form align-items-center" action="/search" method="get">
+            <form class="d-none d-md-flex search-form align-items-center" action="/search" method="get">
                 <div class="input-group input-group-sm">
                     <input type="search" name="searchQuery" class="form-control" placeholder="Please search...">
                     <button class="btn btn-outline-secondary p-0 ms-2 border-0" type="submit">
@@ -57,8 +58,11 @@
     </div>      
 </header>
 
-<nav class="navbar navbar-expand-lg shadow-sm">
+<nav class="navbar navbar-expand-sm navbar-dark shadow-sm">
     <div class="container-fluid p-0">
+        <button class="navbar-toggler ms-3 my-2" type="button" data-bs-toggle="collapse" data-bs-target="#nav-menu" aria-controls="nav-menu" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
         <div class="collapse navbar-collapse justify-content-start" id="nav-menu">
             <ul class="navbar-nav ps-4">
                 <li class="nav-item"><a href="/" class="nav-link">首頁</a></li>

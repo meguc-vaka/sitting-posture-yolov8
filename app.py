@@ -579,6 +579,11 @@ def getLoginDetails():
     userId, firstName = user
     return True, firstName
 
+@app.route("/aboutus")
+def aboutus():
+    loggedIn, firstName = getLoginDetails()
+    return render_template("aboutus.html", loggedIn=loggedIn, firstName=firstName)
+
 @app.route("/profileHome")
 def profileHome():
     if 'email' not in session:

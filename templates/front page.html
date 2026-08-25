@@ -32,7 +32,29 @@
       color: white;
       box-shadow: 0 2px 15px rgba(0,0,0,0.15);
       z-index: 10;
+      position: relative;
     }
+
+    .nav-toggle {
+      display: none;
+      flex-direction: column;
+      gap: 5px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 5px;
+    }
+
+    .nav-toggle span {
+      display: block;
+      width: 24px;
+      height: 3px;
+      background: white;
+      border-radius: 2px;
+      transition: all 0.3s ease;
+    }
+
+    .nav-toggle:hover span { background: #3b82f6; }
 
     .left-content, .right-content {
       display: flex;
@@ -179,6 +201,37 @@
       line-height: 1.5;
       color: #555;
     }
+
+    /* --- 手機適配 --- */
+    @media (max-width: 575.98px) {
+      .nav { padding: 12px 20px; }
+      .nav-toggle { display: flex; }
+      .right-content {
+        display: none;
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        flex-direction: column;
+        background-color: rgba(59, 66, 122, 0.98);
+        padding: 15px 20px;
+        gap: 12px;
+        box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+      }
+      .right-content.show { display: flex; }
+      .right-content a { display: block; text-align: center; padding: 10px 0; border-radius: 8px; }
+      .content-wrapper { flex-direction: column; padding: 20px 5%; gap: 24px; }
+      .Main { padding: 30px 24px; max-width: 100%; }
+      .Main .title { font-size: 36px; }
+      .Main .subtitle { font-size: 15px; }
+      .buttons { flex-direction: column; gap: 12px; }
+      .buttons a { font-size: 16px; padding: 12px 20px; }
+      .features-container { max-width: 100%; }
+      .feature-card { padding: 16px; }
+      .feature-card:hover { transform: none; }
+      .feature-text h3 { font-size: 16px; }
+      .feature-text p { font-size: 13px; }
+    }
   </style>
 </head>
 
@@ -188,7 +241,11 @@
       <h4><span>Logo</span> 骨架偵測</h4>
     </div>
 
-    <div class="right-content">
+    <button class="nav-toggle d-sm-none" type="button" onclick="document.getElementById('nav-right').classList.toggle('show')">
+      <span></span><span></span><span></span>
+    </button>
+
+    <div class="right-content" id="nav-right">
         <div class="login-box">
             {% if not session.get('loggedIn') %}
                 <a href="/loginForm" class="member-link text-decoration-none">會員登入</a>

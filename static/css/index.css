@@ -102,13 +102,18 @@ button#stopBtn:hover {
 .video-box {
     margin: 0;
     width: 100%;
-    min-height: 480px; 
-    height: 100%;
     background-color: #050505;
     border: 1px solid rgba(255, 255, 255, 0.15); 
     border-radius: 8px; 
     position: relative;
     overflow: hidden;
+}
+
+@media (min-width: 992px) {
+    .video-box {
+        min-height: 480px;
+        height: 100%;
+    }
 }
 
 #placeholder {
@@ -152,3 +157,29 @@ button#stopBtn:hover {
 ::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.3); }
 ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.4); }
+
+/* --- 手機適配 --- */
+@media (max-width: 767.98px) {
+    h1 { font-size: 1.5rem; }
+    .controls-wrapper { margin-bottom: 20px; }
+    .controls {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 10px;
+        padding: 14px 16px;
+    }
+    .controls label {
+        width: 100%;
+        text-align: center;
+        margin-right: 0;
+        margin-bottom: 4px;
+    }
+    select, button { font-size: 14px; padding: 8px 14px; margin: 0; }
+    .glass-panel { padding: 14px !important; }
+    .glass-panel h5 { font-size: 1rem; }
+    .ai-prompt-box .fs-3 { font-size: 1.5rem !important; }
+    .video-box { height: auto; flex-grow: 0; }
+    #videoStream { height: auto; display: block; }
+    #placeholder { aspect-ratio: 4 / 3; height: auto; }
+}
