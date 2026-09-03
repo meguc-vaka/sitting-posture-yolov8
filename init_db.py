@@ -96,6 +96,26 @@ def init_db():
     )
     ''')
 
+    # 5. 監測會話彙總表（每次監測 session 一筆）
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS monitoring_sessions (
+        session_id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL,
+        good_frames INTEGER NOT NULL DEFAULT 0,
+        turtle_frames INTEGER NOT NULL DEFAULT 0,
+        down_frames INTEGER NOT NULL DEFAULT 0,
+        slouch_frames INTEGER NOT NULL DEFAULT 0,
+        dominant_posture TEXT,
+        image_path TEXT,
+        posture_ratio TEXT,
+        avg_angle REAL DEFAULT 0,
+        avg_offset REAL DEFAULT 0,
+        FOREIGN KEY (user_id) REFERENCES users (userId)
+    )
+    ''')
+
     conn.commit()
     conn.close()
     print("✨ 資料庫地基重建完成！所有權限與資料表已統一。")

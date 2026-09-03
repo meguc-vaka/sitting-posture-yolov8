@@ -87,11 +87,20 @@ async function startMonitoring(selectedMinutes) {
 confirmStartBtn.addEventListener('click', function() {
     const selectedMinutes = parseInt(durationSelect.value, 10);
     
-    // 關閉 Modal
+    // 強制清除 modal 殘留
     const modalInstance = bootstrap.Modal.getInstance(durationModal);
     if (modalInstance) {
         modalInstance.hide();
+        modalInstance.dispose();
     }
+    document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+    document.body.classList.remove('modal-open');
+    document.body.style.overflow = '';
+    document.body.style.paddingRight = '';
+    document.documentElement.style.overflow = '';
+    
+    // 通知後端開始監測
+    socket.emit('start_monitoring', { duration: selectedMinutes });
     
     startMonitoring(selectedMinutes);
 });
@@ -101,6 +110,9 @@ stopBtn.onclick = function() {
     videoImg.style.display = "none";
     placeholder.style.display = "flex";
 
+    // 通知後端停止監測
+    socket.emit('stop_monitoring');
+    
     if (stream) {
         stream.getTracks().forEach(track => track.stop());
         stream = null;

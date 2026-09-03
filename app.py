@@ -1,4 +1,4 @@
-import base64, hashlib, math, smtplib, threading, time, traceback, os ,sys ,signal
+import base64, hashlib, math, smtplib, threading, time, traceback, os ,sys ,signal, uuid, json
 from collections import deque
 from email.header import Header
 from email.mime.multipart import MIMEMultipart
@@ -42,12 +42,29 @@ posture_counts = {                  # 建立一個用來統計姿勢的字典
     "Slouching": 0
 }
 
+# === 15 秒穩定判定機制 ===
+stability_pending = None            # 正在等待穩定的姿勢
+stability_count = 0                 # 連續相同姿勢的幀數
+STABILITY_THRESHOLD = 150           # 15 秒 × 10fps = 150 幀
+
+# 角度累積器（用於 session 彙總時計算平均）
+total_angle = 0
+angle_count = 0
+total_offset = 0
+offset_count = 0
+
 # 3 分鐘姿勢聚合計數器（全局共享，重連不丟數據）
 posture_history = deque(
     maxlen=30                       # 代表這條輸送帶最多只記得過去 30 次的判定結果 (約 3 秒)
 ) 
 last_warning_time = 0               # 記錄上一次發送 AI 警告的時間戳記
 COOLDOWN_SECONDS = 60               # 設定冷卻時間為 60 秒
+
+# === 3 分鐘定時提示系統 ===
+last_tip_check = time.time()        # 上次檢查提示的時間
+TIP_CHECK_INTERVAL = 120            # 每 2 分鐘檢查一次
+bad_posture_sustained = False       # 過去 3 分鐘內是否曾穩定不良姿勢 15 秒
+BAD_POSTURE_THRESHOLD = 150         # 15 秒 (150 幀) 才觸發
 # 使用動態字典，自動支援任何新加入的姿勢類別
 posture_snapshots = {}
 
@@ -69,114 +86,134 @@ def scanpage():
 def login_form():
     return render_template('login.html')
 
-# === 寫入並重置坐姿紀錄 ===
-def insert_posture_record_if_any(frame=None, image_dir="static/screenshots"):
-    """把當前聚合計數寫入 posture_records 表，寫完後清零並重置計時器。
-    若 total <= 0 則直接 return，不寫空記錄。
-    注意：調用方應持有 record_lock（RLock，允許重入）。"""
-    global posture_counts, last_record_time
-
+def write_session_summary(sid):
+    """將本次 session 的累積數據寫入 monitoring_sessions 彙總表"""
+    global posture_counts, posture_snapshots, last_frame, total_angle, angle_count, total_offset, offset_count
+    
     total = sum(posture_counts.values())
     if total <= 0:
         return
+    
+    session_data = user_monitoring_sessions.get(sid, {})
+    session_id = str(uuid.uuid4())
+    user_id = session_data.get('user_id', 0)
+    start_time = session_data.get('start_time_iso', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    end_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    avg_angle = round(total_angle / angle_count, 1) if angle_count > 0 else 0
+    avg_offset = round(total_offset / offset_count, 1) if offset_count > 0 else 0
+    
+    posture_ratio = json.dumps({
+        "good": round(posture_counts["Good"] / total * 100, 1) if total > 0 else 0,
+        "turtle": round(posture_counts["TurtleNeck"] / total * 100, 1) if total > 0 else 0,
+        "down": round(posture_counts["LookingDown"] / total * 100, 1) if total > 0 else 0,
+        "slouch": round(posture_counts["Slouching"] / total * 100, 1) if total > 0 else 0
+    })
+    
+    dominant = max(posture_counts, key=posture_counts.get)
+    dominant_map = {"Good": "端正坐姿", "TurtleNeck": "烏龜頸", "LookingDown": "過度低頭", "Slouching": "癱坐"}
+    
+    # 取最差姿勢的截圖
+    bad_postures = {k: v for k, v in posture_counts.items() if k != "Good"}
+    worst = min(bad_postures, key=bad_postures.get) if bad_postures else "Good"
+    image_path = ""
+    if worst in posture_snapshots and posture_snapshots[worst] is not None:
+        image_dir = "static/screenshots"
+        if not os.path.exists(image_dir):
+            os.makedirs(image_dir)
+        filename = f"{session_id}.jpg"
+        full_path = os.path.join(image_dir, filename).replace('\\', '/')
+        cv2.imwrite(full_path, posture_snapshots[worst])
+        image_path = full_path
+    
+    execute_db("""
+        INSERT INTO monitoring_sessions 
+        (session_id, user_id, start_time, end_time, good_frames, turtle_frames, down_frames, slouch_frames, dominant_posture, image_path, posture_ratio, avg_angle, avg_offset)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        session_id, user_id, start_time, end_time,
+        posture_counts["Good"], posture_counts["TurtleNeck"],
+        posture_counts["LookingDown"], posture_counts["Slouching"],
+        dominant_map.get(dominant, dominant),
+        image_path, posture_ratio, avg_angle, avg_offset
+    ))
+    
+    # 重置累積器
+    total_angle = 0
+    angle_count = 0
+    total_offset = 0
+    offset_count = 0
+    
+    print(f"[{sid}] Session 彙總寫入完成: {session_id}, 總幀: {total}, 平均角度: {avg_angle}°")
 
-    now_struct = time.localtime()
-    now_ts = time.strftime('%Y-%m-%d %H:%M:%S', now_struct)
-    filename = time.strftime('%Y%m%d_%H%M%S.jpg', now_struct)
-
-    #now_ts = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
-    if not os.path.exists(image_dir):
-        os.makedirs(image_dir)
-
-    image_path = os.path.join(image_dir, filename).replace('\\', '/')
-    with record_lock:
-        # 持鎖後再算一次，避免並發競態
-        total2 = sum(posture_counts.values())
-        if total2 <= 0:
-            return
-
-        if frame is not None:
-            cv2.imwrite(image_path, frame)
-        else:
-            image_path = ""
-
-        query = """
-            INSERT INTO posture_records (
-                good_count, turtle_neck_count,
-                looking_down_count, slouching_count, timestamp, image_path
-            ) VALUES (?, ?, ?, ?, ?, ?)
-        """
-        args = (
-            posture_counts['Good'],
-            posture_counts['TurtleNeck'],
-            posture_counts['LookingDown'],
-            posture_counts['Slouching'],
-            now_ts,
-            image_path
-        )
-        execute_db(query, args)
-
-        # 清零並刷新時間戳
-        for k in posture_counts:
-            posture_counts[k] = 0
-        last_record_time = time.time()
-
-# 取得坐姿歷史紀錄（含分頁與狀態判斷）並渲染頁面(record.html)
+# 取得坐姿會話紀錄（含分頁）並渲染頁面(record.html)
 @app.route('/renaissance')
 def posture_record():
-    # 1. 取得當前頁碼 (預設為第 1 頁) 與每頁顯示筆數
     page = request.args.get('page', 1, type=int)
-    per_page = 10 
+    per_page = 10
+    
+    user_id = session.get('userId', 0)
+    is_admin = session.get('role') == 'admin'
 
-    # 2. 計算總紀錄數與總頁數 (使用 one=True 取得單一紀錄)
-    total_row = query_db("SELECT COUNT(*) FROM posture_records", one=True)
-    total_records = total_row[0] if total_row else 0
-    total_pages = math.ceil(total_records / per_page)
-
-    # 3. 根據頁碼，計算要「跳過」幾筆資料 (OFFSET)，再撈取該頁資料 (LIMIT)
-    offset = (page - 1) * per_page
-    db_records = query_db(
-        "SELECT * FROM posture_records ORDER BY timestamp DESC LIMIT ? OFFSET ?", 
-        (per_page, offset)
-    )
+    if is_admin:
+        total_row = query_db("SELECT COUNT(*) FROM monitoring_sessions", one=True)
+        total_records = total_row[0] if total_row else 0
+        total_pages = math.ceil(total_records / per_page) if total_records > 0 else 1
+        offset = (page - 1) * per_page
+        db_records = query_db(
+            "SELECT ms.*, u.firstName, u.lastName FROM monitoring_sessions ms LEFT JOIN users u ON ms.user_id = u.userId ORDER BY ms.start_time DESC LIMIT ? OFFSET ?",
+            (per_page, offset)
+        )
+    elif user_id > 0:
+        total_row = query_db("SELECT COUNT(*) FROM monitoring_sessions WHERE user_id = ?", (user_id,), one=True)
+        total_records = total_row[0] if total_row else 0
+        total_pages = math.ceil(total_records / per_page) if total_records > 0 else 1
+        offset = (page - 1) * per_page
+        db_records = query_db(
+            "SELECT * FROM monitoring_sessions WHERE user_id = ? ORDER BY start_time DESC LIMIT ? OFFSET ?",
+            (user_id, per_page, offset)
+        )
+    else:
+        total_row = query_db("SELECT COUNT(*) FROM monitoring_sessions", one=True)
+        total_records = total_row[0] if total_row else 0
+        total_pages = math.ceil(total_records / per_page) if total_records > 0 else 1
+        offset = (page - 1) * per_page
+        db_records = query_db(
+            "SELECT * FROM monitoring_sessions ORDER BY start_time DESC LIMIT ? OFFSET ?",
+            (per_page, offset)
+        )
     
     history_data = []
     for row in db_records:
-        status = "端正坐姿"
-        badge = "badge-good"
-        if row['turtle_neck_count'] > 50:
-            status = "烏龜頸頻發"
-            badge = "badge-warning"
-        elif row['looking_down_count'] > 50:
-            status = "過度低頭"
-            badge = "badge-danger"
-        elif row['slouching_count'] > 50:
-            status = "癱坐前滑"
-            badge = "badge-warning"
-
         row_dict = dict(row)
-        raw_path = row_dict.get('image_path')
-
-        raw_path = row['image_path'] if 'image_path' in row.keys() else None
-        image_url = None
-        if raw_path:
-            # 替換斜線，確保路徑開頭包含 '/'
-            clean_path = raw_path.replace('\\', '/')
-            image_url = '/' + clean_path if not clean_path.startswith('/') else clean_path
+        dominant = row_dict.get('dominant_posture', '未知')
+        
+        if dominant == '端正坐姿':
+            badge = 'badge-good'
+        elif '烏龜' in dominant or '低頭' in dominant or '癱坐' in dominant:
+            badge = 'badge-danger'
+        else:
+            badge = 'badge-warning'
+        
+        import json as _json
+        ratio_str = row_dict.get('posture_ratio', '{}')
+        try:
+            ratio = _json.loads(ratio_str)
+        except:
+            ratio = {}
         
         history_data.append({
-            "id": row['id'],
-            "time": row['timestamp'],
-            "status": status,
+            "id": row_dict.get('session_id', '')[:8],
+            "time": row_dict.get('start_time', ''),
+            "status": dominant,
             "badge_class": badge,
-            "offset": f"烏龜頸: {row['turtle_neck_count']} 幀", 
-            "angle": f"低頭: {row['looking_down_count']} 幀",
-            "note": f"良好姿勢共維持 {row['good_count']} 幀",
-            "image_url": image_url 
+            "offset": f"{row_dict.get('avg_offset', 0):.0f} px",
+            "angle": f"{row_dict.get('avg_angle', 0):.0f}°",
+            "note": f"{'👤 ' + (row_dict.get('lastName', '') + row_dict.get('firstName', '') or '未知') + ' | ' if is_admin else ''}烏龜:{row_dict.get('turtle_frames',0)} 低頭:{row_dict.get('down_frames',0)} 癱坐:{row_dict.get('slouch_frames',0)}",
+            "image_url": None
         })
 
-    # 4. 將分頁所需的數據打包，一併傳給網頁
-    return render_template('record.html', 
+    return render_template('record.html',
                            records=history_data,
                            page=page,
                            total_pages=total_pages,
@@ -190,6 +227,8 @@ last_bad_frame = None
 @socketio.on('video_frame')
 def handle_frame(data):
     global last_warning_time, last_frame, posture_snapshots
+    global stability_pending, stability_count, total_angle, angle_count, total_offset, offset_count
+    global last_tip_check, bad_posture_sustained
     
     try:
         encoded_data = data.split(',')[1]
@@ -206,43 +245,51 @@ def handle_frame(data):
             last_frame = frame.copy()
             posture_snapshots[posture_status] = frame.copy()
 
-            # === 3 分鐘聚合計數 ===
-            if posture_status in posture_counts:
-                with record_lock:
-                    posture_counts[posture_status] += 1
-                    if time.time() - last_record_time >= 180:
-                        # 1. 找出 3 分鐘內累積最多幀的「主要姿勢」
-                        dominant_posture = max(posture_counts, key=posture_counts.get)
-                        
-                        # 2. 取出該主要姿勢的照片（若無則降級使用 last_frame）
-                        target_frame = posture_snapshots.get(dominant_posture, last_frame)
-                        
-                        # 3. 寫入資料庫並存檔
-                        insert_posture_record_if_any(target_frame)
-                        
-                        # 4. 清空快照字典
-                        posture_snapshots.clear()
+            # === 15 秒穩定判定後才計數 ===
+            if posture_status == stability_pending:
+                stability_count += 1
+                if stability_count >= STABILITY_THRESHOLD:
+                    if posture_status != "Good":
+                        bad_posture_sustained = True
+                    if posture_status in posture_counts:
+                        with record_lock:
+                            posture_counts[posture_status] += 1
+                            if angle is not None:
+                                total_angle += angle
+                                angle_count += 1
+                            if keypoints_dict is not None:
+                                offset_x = abs(keypoints_dict['ear'][0] - keypoints_dict['shoulder'][0])
+                                total_offset += offset_x
+                                offset_count += 1
+            else:
+                stability_pending = posture_status
+                stability_count = 1
 
-            # 狀態追蹤與 AI 通報機制 (保持不變)
-            is_bad_posture = (posture_status != "Good")
-            posture_history.append(is_bad_posture)
+            # === 3 分鐘定時提示 ===
+            global last_tip_check, last_warning_time
             
-            if len(posture_history) == 30 and posture_history.count(True) >= 25:
-                current_time = time.time()
-                if current_time - last_warning_time > COOLDOWN_SECONDS:
+            if time.time() - last_tip_check >= TIP_CHECK_INTERVAL:
+                last_tip_check = time.time()
+                print(f"[TIP CHECK] sustained={bad_posture_sustained}, cooldown_ok={time.time() - last_warning_time >= COOLDOWN_SECONDS}")
+                print(f"[TIP CHECK] sustained={bad_posture_sustained}, cooldown_ok={time.time() - last_warning_time >= COOLDOWN_SECONDS}")
+                if bad_posture_sustained and time.time() - last_warning_time >= COOLDOWN_SECONDS:
+                    bad_posture_sustained = False
+                    if stability_pending is not None and stability_pending != "Good":
+                        target = stability_pending
+                    else:
+                        target = "Slouching"
                     advice_message = ""
-                    if posture_status == "TurtleNeck":
+                    if target == "TurtleNeck":
                         advice_message = "您的頸部似乎有些前傾囉！請試著深呼吸，將肩膀往後放鬆，下巴微收，保護您的頸椎。"
-                    elif posture_status == "LookingDown":
+                    elif target == "LookingDown":
                         advice_message = "視線好像太低了！請試著抬起頭平視前方，讓頸椎休息一下吧。"
-                    elif posture_status == "Slouching":
+                    elif target == "Slouching":
                         advice_message = "身體是不是有點往後滑了呢？稍微把骨盆扶正，讓脊椎回到舒服的弧度喔。"
                     else:
                         advice_message = "系統偵測到您的坐姿需要調整囉，稍微伸展一下吧！"
                     
                     emit('ai_alert', {'message': advice_message})
-                    last_warning_time = current_time
-                    posture_history.clear()
+                    last_warning_time = time.time()
 
         # 壓縮回傳前端
         ret, buffer = cv2.imencode('.jpg', frame)
@@ -258,18 +305,23 @@ def handle_frame(data):
 @socketio.on('connect')
 def handle_connect(auth=None):
     """重連時先將舊 session 的累計數據落庫，再重置所有會話狀態，避免跨 session 汙染。"""
-    global last_record_time, last_warning_time, last_frame, posture_snapshots
+    global last_record_time, last_warning_time, last_frame, posture_snapshots, stability_pending, stability_count, last_tip_check, bad_posture_sustained, total_angle, angle_count, total_offset, offset_count
     with record_lock:
         if sum(posture_counts.values()) > 0:
-            dominant_posture = max(posture_counts, key=posture_counts.get)
-            target_frame = posture_snapshots.get(dominant_posture, last_frame)
-            insert_posture_record_if_any(target_frame)
+            write_session_summary(sid)
         for k in posture_counts:
             posture_counts[k] = 0
         last_record_time = time.time()
         posture_snapshots.clear()
         last_frame = None
-    # 清空 AI 警告的滑動窗口與冷卻計時器，新 session 從零開始
+        stability_pending = None
+        stability_count = 0
+        last_tip_check = time.time()
+        bad_posture_sustained = False
+        total_angle = 0
+        angle_count = 0
+        total_offset = 0
+        offset_count = 0
     posture_history.clear()
     last_warning_time = 0
 
@@ -277,26 +329,26 @@ def handle_connect(auth=None):
 # === 斷線處理（配合 30 秒防閃斷機制）===
 @socketio.on('disconnect')
 def handle_disconnect(*args):
-    """尾部強制結算：關閉頁面時把未滿 180 秒的累計數據寫入庫。
-    觸發條件：距離上次入庫超過 30 秒（避免閃斷刷新就觸發）。"""
-    global last_record_time, last_frame, last_bad_frame, posture_snapshots
+    """尾部強制結算：關閉頁面時把未結算的 session 數據寫入庫。"""
+    global last_record_time, last_frame, posture_snapshots, last_tip_check, bad_posture_sustained, total_angle, angle_count, total_offset, offset_count
     sid = request.sid
 
     with record_lock:
-        if time.time() - last_record_time >= 30:
-            if sum(posture_counts.values()) > 0:
-                dominant_posture = max(posture_counts, key=posture_counts.get)
-                target_frame = posture_snapshots.get(dominant_posture, last_frame)
-                insert_posture_record_if_any(target_frame)
+        if sum(posture_counts.values()) > 0:
+            write_session_summary(sid)
         
-        # 不論是否達到 30 秒落庫門檻，斷線時都徹底歸零狀態，避免殘留至下次連線
         for k in posture_counts:
             posture_counts[k] = 0
         posture_snapshots.clear()
         last_frame = None
+        total_angle = 0
+        angle_count = 0
+        total_offset = 0
+        offset_count = 0
 
-    # 清理 AI 滑動窗口與時長追蹤快取
     posture_history.clear()
+    last_tip_check = time.time()
+    bad_posture_sustained = False
     user_monitoring_sessions.pop(sid, None)
     print(f"[{sid}] 離線結算完成，狀態已重置。")
 
@@ -306,25 +358,33 @@ user_monitoring_sessions = {}
 @socketio.on('start_monitoring')
 def handle_start_monitoring(data):
     """前端點擊確認開始時觸發：初始化/重置狀態"""
-    global last_record_time, last_warning_time, last_frame, posture_snapshots
+    global last_record_time, last_warning_time, last_frame, posture_snapshots, stability_pending, stability_count, last_tip_check, bad_posture_sustained, total_angle, angle_count, total_offset, offset_count
     sid = request.sid
     duration_minutes = data.get('duration', 0)
     
     with record_lock:
-        # 重置計數器
         for k in posture_counts:
             posture_counts[k] = 0
         last_record_time = time.time()
         posture_snapshots.clear()
         last_frame = None
+        stability_pending = None
+        stability_count = 0
+        last_tip_check = time.time() - TIP_CHECK_INTERVAL  # 首次立即檢查
+        bad_posture_sustained = False
+        total_angle = 0
+        angle_count = 0
+        total_offset = 0
+        offset_count = 0
 
     posture_history.clear()
     last_warning_time = 0
     
-    # 紀錄該次會話設定
     user_monitoring_sessions[sid] = {
         'start_time': time.time(),
-        'target_duration': duration_minutes
+        'start_time_iso': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'target_duration': duration_minutes,
+        'user_id': data.get('user_id', 0) or session.get('userId', 0)
     }
     print(f"[{sid}] 開始監測，預定時長: {duration_minutes} 分鐘")
 
@@ -332,15 +392,13 @@ def handle_start_monitoring(data):
 # === 手動停止 / 倒數時間到（主動結算）===
 @socketio.on('stop_monitoring')
 def handle_stop_monitoring():
-    """使用者點擊暫停或倒數時間到：直接落庫結算（不受 30 秒限制）"""
-    global last_record_time, last_frame, posture_snapshots
+    """使用者點擊暫停或倒數時間到：直接結算 session"""
+    global last_frame, posture_snapshots, last_tip_check, bad_posture_sustained
     sid = request.sid
 
     with record_lock:
         if sum(posture_counts.values()) > 0:
-            dominant_posture = max(posture_counts, key=posture_counts.get)
-            target_frame = posture_snapshots.get(dominant_posture, last_frame)
-            insert_posture_record_if_any(target_frame)
+            write_session_summary(sid)
 
         for k in posture_counts:
             posture_counts[k] = 0
@@ -348,42 +406,50 @@ def handle_stop_monitoring():
         last_frame = None
 
     posture_history.clear()
+    last_tip_check = time.time()
+    bad_posture_sustained = False
     user_monitoring_sessions.pop(sid, None)
-    print(f"[{sid}] 監測主動停止，數據已結算落庫。")
+    print(f"[{sid}] 監測主動停止，session 已結算落庫。")
 
-#坐姿紀錄整理成圖表
+#坐姿紀錄整理成圖表（個人數據）
 @app.route('/analysis')
 def posture_analysis():
-    db_records = query_db("SELECT * FROM posture_records ORDER BY timestamp DESC LIMIT 30")
+    user_id = session.get('userId', 0)
+    is_admin = session.get('role') == 'admin'
+    
+    if is_admin:
+        db_records = query_db("SELECT * FROM monitoring_sessions ORDER BY start_time DESC LIMIT 30")
+    else:
+        db_records = query_db(
+            "SELECT * FROM monitoring_sessions WHERE user_id = ? ORDER BY start_time DESC LIMIT 30",
+            (user_id,)
+        )
     db_records = db_records[::-1] if db_records else []
     
-    # 準備餵給折線圖的資料陣列
     labels = []
     good_data = []
     turtle_data = []
     down_data = []
     slouch_data = []
     
-    # 準備餵給圓餅圖的加總變數
     total_good = 0
     total_turtle = 0
     total_down = 0
     total_slouch = 0
     
     for row in db_records:
-        time_str = row['timestamp'].split(' ')[1] if ' ' in row['timestamp'] else row['timestamp']
+        time_str = row['start_time'].split(' ')[1][:5] if ' ' in str(row['start_time']) else str(row['start_time'])
         labels.append(time_str)
         
-        good_data.append(row['good_count'])
-        turtle_data.append(row['turtle_neck_count'])
-        down_data.append(row['looking_down_count'])
-        slouch_data.append(row['slouching_count'])
+        good_data.append(row['good_frames'])
+        turtle_data.append(row['turtle_frames'])
+        down_data.append(row['down_frames'])
+        slouch_data.append(row['slouch_frames'])
         
-        # 順便把這些數字加總起來
-        total_good += row['good_count']
-        total_turtle += row['turtle_neck_count']
-        total_down += row['looking_down_count']
-        total_slouch += row['slouching_count']
+        total_good += row['good_frames']
+        total_turtle += row['turtle_frames']
+        total_down += row['down_frames']
+        total_slouch += row['slouch_frames']
         
     chart_data = {
         "labels": labels,
@@ -398,39 +464,38 @@ def posture_analysis():
 
 @app.route('/rank')
 def posture_rank():
-    # 這裡未來會替換成「撈取近一週資料庫並計算比例」的真實邏輯
-    mock_ranking_data = [
-        {
-            "rank": 1, 
-            "name": "過度低頭", 
-            "desc": "頸部前傾超過標準角度，極易造成頸椎壓力與肩頸痠痛。建議將螢幕墊高至視線平齊。", 
-            "count": 1250, 
-            "percent": 45
-        },
-        {
-            "rank": 2, 
-            "name": "烏龜頸頻發", 
-            "desc": "耳朵水平位移超出肩膀中線，長期可能導致頸椎提早退化。請試著微收下巴。", 
-            "count": 840, 
-            "percent": 30
-        },
-        {
-            "rank": 3, 
-            "name": "癱坐前滑", 
-            "desc": "骨盆過度前傾滑出椅面，腰椎失去支撐，易引發下背痛。請將臀部坐滿椅面。", 
-            "count": 420, 
-            "percent": 15
-        },
-        {
-            "rank": 4, 
-            "name": "端正坐姿", 
-            "desc": "脊椎保持自然曲度，肌肉受力平均的優良狀態。請繼續保持這個好習慣！", 
-            "count": 280, 
-            "percent": 10
-        }
-    ]
+    rows = query_db("""
+        SELECT dominant_posture, COUNT(*) as cnt, SUM(good_frames + turtle_frames + down_frames + slouch_frames) as total
+        FROM monitoring_sessions
+        WHERE dominant_posture != '端正坐姿'
+        GROUP BY dominant_posture
+        ORDER BY cnt DESC
+        LIMIT 4
+    """)
     
-    return render_template('rank.html', rankings=mock_ranking_data)
+    total_all = sum(r['cnt'] for r in rows) if rows else 1
+    
+    rank_data = []
+    desc_map = {
+        "烏龜頸": "耳朵水平位移超出肩膀中線，長期可能導致頸椎提早退化。請試著微收下巴。",
+        "過度低頭": "頸部前傾超過標準角度，極易造成頸椎壓力與肩頸痠痛。建議將螢幕墊高至視線平齊。",
+        "癱坐": "骨盆過度前傾滑出椅面，腰椎失去支撐，易引發下背痛。請將臀部坐滿椅面。"
+    }
+    
+    for i, row in enumerate(rows):
+        name = row['dominant_posture']
+        rank_data.append({
+            "rank": i + 1,
+            "name": name,
+            "desc": desc_map.get(name, "請注意保持正確坐姿"),
+            "count": row['cnt'],
+            "percent": round(row['cnt'] / total_all * 100)
+        })
+    
+    if not rank_data:
+        rank_data = [{"rank": 1, "name": "尚無數據", "desc": "尚未有足夠的監測紀錄", "count": 0, "percent": 100}]
+    
+    return render_template('rank.html', rankings=rank_data)
 
 @app.route('/login', methods=['POST'])
 def login():
