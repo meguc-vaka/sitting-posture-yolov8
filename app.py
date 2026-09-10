@@ -1,5 +1,6 @@
 import base64, hashlib, math, smtplib, threading, time, traceback, os ,sys ,signal, uuid, json
-from collections import deque
+from collections import defaultdict,deque
+from datetime import datetime, timedelta
 from email.header import Header
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -11,30 +12,39 @@ from flask_socketio import SocketIO, emit
 from flask_apscheduler import APScheduler
 
 from controllers.controller import Controller
-from collections import defaultdict
 from db import init_db, query_db, execute_db
 from models.load_model import Model
-from datetime import datetime, timedelta
 
+class Config:
+    SCHEDULER_API_ENABLED = True
+
+# ==========================================
+# 4. App & Extensions Initialization (應用與擴展初始化)
+# ==========================================
 app = Flask(__name__)
+app.config.from_object(Config())
 app.secret_key = 'secret_key_for_session' # 設定 Session 的加密金鑰
+
+scheduler = APScheduler()
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
-def graceful_exit(sig, frame):
-    print("\n正在停止排程器並退出...")
-    try:
-        if scheduler.running:
-            scheduler.shutdown(wait=False)
-    except Exception:
-        pass
-    os._exit(0)
+# ==========================================
+# 5. Configurations & Constants (常數與設定)
+# ==========================================
+DB_PATH = 'database.db'
+COOLDOWN_SECONDS = 60                    # 設定冷卻時間為 60 秒 (AI 姿勢警告訊息（ai_alert）的最短發送間隔)
 
-# 註冊中斷訊號
-signal.signal(signal.SIGINT, graceful_exit)
-signal.signal(signal.SIGTERM, graceful_exit)
+# --- SMTP 郵件通知設定 ---
+SMTP_SERVER = 'smtp.gmail.com'           # 郵件伺服器主機位址 (Gmail的位置)
+SMTP_PORT = 465                          # SSL 端口
+SENDER_EMAIL = 'startpan070@gmail.com'   # 寄件人 Gmail 帳號
+SENDER_PASSWORD = 'mqpp ahrw tbbb ypuu'  # Google 產生的應用程式專用密碼
+RECEIVER_EMAIL = 'startpan070@gmail.com' # 收件人 Email (測試效果用)
 
 record_lock = threading.RLock()     # 全域只宣告一次鎖頭
 last_record_time = time.time()      # 紀錄初始時間
+last_warning_time = 0               # 記錄上一次發送 AI 警告的時間戳記
+
 posture_counts = {                  # 建立一個用來統計姿勢的字典
     "Good": 0,
     "TurtleNeck": 0,
@@ -53,40 +63,169 @@ angle_count = 0
 total_offset = 0
 offset_count = 0
 
-# 3 分鐘姿勢聚合計數器（全局共享，重連不丟數據）
-posture_history = deque(
-    maxlen=30                       # 代表這條輸送帶最多只記得過去 30 次的判定結果 (約 3 秒)
-) 
-last_warning_time = 0               # 記錄上一次發送 AI 警告的時間戳記
-COOLDOWN_SECONDS = 60               # 設定冷卻時間為 60 秒
-
 # === 3 分鐘定時提示系統 ===
 last_tip_check = time.time()        # 上次檢查提示的時間
 TIP_CHECK_INTERVAL = 120            # 每 2 分鐘檢查一次
 bad_posture_sustained = False       # 過去 3 分鐘內是否曾穩定不良姿勢 15 秒
 BAD_POSTURE_THRESHOLD = 150         # 15 秒 (150 幀) 才觸發
-# 使用動態字典，自動支援任何新加入的姿勢類別
-posture_snapshots = {}
 
-DB_PATH = 'database.db'
+last_frame = None           #暫存偵測時當下最新的一張畫面截圖
+last_bad_frame = None       #暫存偵測時當下錯誤姿勢最新的一張畫面截圖
+posture_snapshots = {}      #暫存偵測時不同姿勢當下最新的一張畫面截圖
+
+# 3 分鐘姿勢聚合計數器（全局共享，重連不丟數據）
+posture_history = deque(
+    maxlen=30                       # 代表這條輸送帶最多只記得過去 30 次的判定結果 (約 3 秒)
+) 
+
 init_db()  # 啟動伺服器前自動檢查並建表
-
 print("正在初始化 AI 模型...")
 pose_model = Model("yolov8n-pose.pt")
+
+# --- 系統中斷處理 (Signal Handler) ---
+def graceful_exit(sig, frame):
+    print("\n正在停止排程器並退出...")
+    try:
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+    except Exception:
+        pass
+    os._exit(0)
+
+# 註冊中斷訊號
+signal.signal(signal.SIGINT, graceful_exit)
+signal.signal(signal.SIGTERM, graceful_exit)
 
 @app.route('/')
 def index():
     return render_template('front page.html')
 
-@app.route('/ScanPage')
-def scanpage():
-    return render_template('index.html')
+def getLoginDetails():
+    if 'email' not in session:
+        return False, ''
+    
+    user = query_db("SELECT userId, firstName FROM users WHERE email = ?", (session['email'],), one=True)
+    if not user:
+        return False, ''
+    
+    userId, firstName = user
+    return True, firstName
 
 @app.route('/loginForm')
 def login_form():
     return render_template('login.html')
 
-def write_session_summary(sid):
+@app.route('/login', methods=['POST'])
+def login():
+    # 1. 取得使用者在網頁表單輸入的帳號密碼
+    email = request.form.get('email')
+    password = request.form.get('password')
+    
+    # 2. 建立資料庫連線、3. 去資料庫尋找這個信箱
+    user = query_db("SELECT * FROM users WHERE email = ?", (email,), one=True)
+    
+    # 4. 密碼驗證 (將輸入的密碼做 MD5 處理後，與資料庫比對)
+    if user:
+        hashed_input_password = hashlib.md5(password.encode()).hexdigest()
+        
+        if user['password'] == hashed_input_password:
+            # 登入成功！將重要資訊寫入 Session (使用者的通行證)
+            session['loggedIn'] = True
+            session['userId'] = user['userId']
+            session['email'] = user['email']
+            session['firstName'] = user['firstName']
+            
+            # 根據 isAdmin 標籤，發給不同的權限
+            if user['isAdmin'] == 1:
+                session['role'] = 'admin'
+            else:
+                session['role'] = 'user'
+                
+            # 登入成功後，把使用者踢回首頁 (假設首頁的函數名稱為 index)
+            return redirect(url_for('index'))
+            
+    # 如果找不到帳號，或是密碼比對失敗
+    return "帳號或密碼錯誤，請回上一頁重新輸入"
+
+@app.route('/logout')
+def logout():
+    # 清空 session 裡的所有資料 (銷毀通行證)
+    session.clear()
+    
+    # 登出後，把使用者踢回首頁
+    return redirect(url_for('index'))
+
+@app.route("/profileHome")
+def profileHome():
+    if 'email' not in session:
+        return redirect(url_for('index'))
+    loggedIn, firstName = getLoginDetails()
+    profileData = query_db("SELECT email, firstName, lastName, address1, phone, weight, height FROM users WHERE email = ?", (session['email'],), one=True)
+    return render_template("profileHome.html", profileData=profileData, loggedIn=loggedIn, firstName=firstName)
+
+@app.route("/editProfile")
+def editProfile():
+    if 'email' not in session:
+        return redirect(url_for('index'))
+    loggedIn, firstName = getLoginDetails()
+    profileData = query_db("SELECT email, firstName, lastName, address1, phone, weight, height FROM users WHERE email = ?", (session['email'],), one=True)
+    return render_template("editProfile.html", profileData=profileData, loggedIn=loggedIn, firstName=firstName)
+
+@app.route("/account/profile/changePassword", methods=["GET", "POST"])
+def changePassword():
+    if 'email' not in session:
+        return redirect(url_for('loginForm'))
+    if request.method == "POST":
+        oldPassword = request.form['oldpassword']
+        oldPassword = hashlib.md5(oldPassword.encode()).hexdigest()
+        newPassword = request.form['newpassword']
+        newPassword = hashlib.md5(newPassword.encode()).hexdigest()
+        user = query_db("SELECT userId, password FROM users WHERE email = ?", (session['email'],), one=True)
+        if user:
+            userId, password = user
+            if (password == oldPassword):
+                try:
+                    execute_db("UPDATE users SET password = ? WHERE userId = ?", (newPassword, userId))
+                    msg = "Changed successfully"
+                except Exception as e:
+                    msg = "Failed"
+                return render_template("changePassword.html", msg=msg)
+            else:
+                msg = "Wrong password"
+                return render_template("changePassword.html", msg=msg)
+        else:
+            msg = "User not found"
+            return render_template("changePassword.html", msg=msg)
+    else:
+        return render_template("changePassword.html")
+
+@app.route("/updateProfile", methods=["GET", "POST"])
+def updateProfile():
+    if request.method == 'POST':
+        email = request.form['email']
+        firstName = request.form['firstName']
+        lastName = request.form['lastName']
+        address1 = request.form['address1']
+        phone = request.form['phone']
+        weight = request.form['weight']
+        height = request.form['height']
+        try:
+            execute_db(
+                '''UPDATE users 
+                   SET firstName = ?, lastName = ?, address1 = ?, phone = ?, weight = ?, height = ? 
+                   WHERE email = ?''',
+                (firstName, lastName, address1, phone, weight, height, email)
+            )
+            msg = "Saved Successfully"
+        except Exception as e:
+            msg = "Error occured"
+        return redirect(url_for('editProfile'))
+
+@app.route('/ScanPage')
+def scanpage():
+    return render_template('index.html')
+
+def write_session_summary(sid, user_id=None):
     """將本次 session 的累積數據寫入 monitoring_sessions 彙總表"""
     global posture_counts, posture_snapshots, last_frame, total_angle, angle_count, total_offset, offset_count
     
@@ -146,84 +285,8 @@ def write_session_summary(sid):
     
     print(f"[{sid}] Session 彙總寫入完成: {session_id}, 總幀: {total}, 平均角度: {avg_angle}°")
 
-# 取得坐姿會話紀錄（含分頁）並渲染頁面(record.html)
-@app.route('/renaissance')
-def posture_record():
-    page = request.args.get('page', 1, type=int)
-    per_page = 10
-    
-    user_id = session.get('userId', 0)
-    is_admin = session.get('role') == 'admin'
-
-    if is_admin:
-        total_row = query_db("SELECT COUNT(*) FROM monitoring_sessions", one=True)
-        total_records = total_row[0] if total_row else 0
-        total_pages = math.ceil(total_records / per_page) if total_records > 0 else 1
-        offset = (page - 1) * per_page
-        db_records = query_db(
-            "SELECT ms.*, u.firstName, u.lastName FROM monitoring_sessions ms LEFT JOIN users u ON ms.user_id = u.userId ORDER BY ms.start_time DESC LIMIT ? OFFSET ?",
-            (per_page, offset)
-        )
-    elif user_id > 0:
-        total_row = query_db("SELECT COUNT(*) FROM monitoring_sessions WHERE user_id = ?", (user_id,), one=True)
-        total_records = total_row[0] if total_row else 0
-        total_pages = math.ceil(total_records / per_page) if total_records > 0 else 1
-        offset = (page - 1) * per_page
-        db_records = query_db(
-            "SELECT * FROM monitoring_sessions WHERE user_id = ? ORDER BY start_time DESC LIMIT ? OFFSET ?",
-            (user_id, per_page, offset)
-        )
-    else:
-        total_row = query_db("SELECT COUNT(*) FROM monitoring_sessions", one=True)
-        total_records = total_row[0] if total_row else 0
-        total_pages = math.ceil(total_records / per_page) if total_records > 0 else 1
-        offset = (page - 1) * per_page
-        db_records = query_db(
-            "SELECT * FROM monitoring_sessions ORDER BY start_time DESC LIMIT ? OFFSET ?",
-            (per_page, offset)
-        )
-    
-    history_data = []
-    for row in db_records:
-        row_dict = dict(row)
-        dominant = row_dict.get('dominant_posture', '未知')
-        
-        if dominant == '端正坐姿':
-            badge = 'badge-good'
-        elif '烏龜' in dominant or '低頭' in dominant or '癱坐' in dominant:
-            badge = 'badge-danger'
-        else:
-            badge = 'badge-warning'
-        
-        import json as _json
-        ratio_str = row_dict.get('posture_ratio', '{}')
-        try:
-            ratio = _json.loads(ratio_str)
-        except:
-            ratio = {}
-        
-        history_data.append({
-            "id": row_dict.get('session_id', '')[:8],
-            "time": row_dict.get('start_time', ''),
-            "status": dominant,
-            "badge_class": badge,
-            "offset": f"{row_dict.get('avg_offset', 0):.0f} px",
-            "angle": f"{row_dict.get('avg_angle', 0):.0f}°",
-            "note": f"{'👤 ' + (row_dict.get('lastName', '') + row_dict.get('firstName', '') or '未知') + ' | ' if is_admin else ''}烏龜:{row_dict.get('turtle_frames',0)} 低頭:{row_dict.get('down_frames',0)} 癱坐:{row_dict.get('slouch_frames',0)}",
-            "image_url": None
-        })
-
-    return render_template('record.html',
-                           records=history_data,
-                           page=page,
-                           total_pages=total_pages,
-                           total_records=total_records,
-                           per_page=per_page)
-
 # 建立一個 WebSocket 接收通道，名稱叫做 'video_frame'
 #接收前端影像幀進行 AI 姿勢識別、骨架標記繪製、定期統計落庫與不良姿勢即時警告
-last_frame = None
-last_bad_frame = None
 @socketio.on('video_frame')
 def handle_frame(data):
     global last_warning_time, last_frame, posture_snapshots
@@ -231,6 +294,10 @@ def handle_frame(data):
     global last_tip_check, bad_posture_sustained
     
     try:
+        # 取得當前使用者 ID (優先從 session 取得，若無則從監測 session 字典取得)
+        sid = request.sid
+        user_id = session.get('user_id') or session.get('userId') or user_monitoring_sessions.get(sid, {}).get('user_id')
+
         encoded_data = data.split(',')[1]
         nparr = np.frombuffer(base64.b64decode(encoded_data), np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -306,6 +373,9 @@ def handle_frame(data):
 def handle_connect(auth=None):
     """重連時先將舊 session 的累計數據落庫，再重置所有會話狀態，避免跨 session 汙染。"""
     global last_record_time, last_warning_time, last_frame, posture_snapshots, stability_pending, stability_count, last_tip_check, bad_posture_sustained, total_angle, angle_count, total_offset, offset_count
+    sid = request.sid
+    user_id = session.get('user_id') or session.get('userId') or (auth.get('user_id') if isinstance(auth, dict) else None)    
+
     with record_lock:
         if sum(posture_counts.values()) > 0:
             write_session_summary(sid)
@@ -332,10 +402,12 @@ def handle_disconnect(*args):
     """尾部強制結算：關閉頁面時把未結算的 session 數據寫入庫。"""
     global last_record_time, last_frame, posture_snapshots, last_tip_check, bad_posture_sustained, total_angle, angle_count, total_offset, offset_count
     sid = request.sid
+    user_id = session.get('user_id') or session.get('userId') or user_monitoring_sessions.get(sid, {}).get('user_id')
 
     with record_lock:
-        if sum(posture_counts.values()) > 0:
-            write_session_summary(sid)
+        if time.time() - last_record_time >= 30:
+            if sum(posture_counts.values()) > 0:
+                write_session_summary(sid)
         
         for k in posture_counts:
             posture_counts[k] = 0
@@ -355,12 +427,14 @@ def handle_disconnect(*args):
 # 紀錄該連線的監測開始時間與預定時長 (可依 socket id 記錄)
 user_monitoring_sessions = {}
 
+# === 手動開始 / 計時開始===
 @socketio.on('start_monitoring')
 def handle_start_monitoring(data):
     """前端點擊確認開始時觸發：初始化/重置狀態"""
     global last_record_time, last_warning_time, last_frame, posture_snapshots, stability_pending, stability_count, last_tip_check, bad_posture_sustained, total_angle, angle_count, total_offset, offset_count
     sid = request.sid
     duration_minutes = data.get('duration', 0)
+    user_id = data.get('user_id') or session.get('user_id') or session.get('userId')
     
     with record_lock:
         for k in posture_counts:
@@ -380,14 +454,16 @@ def handle_start_monitoring(data):
     posture_history.clear()
     last_warning_time = 0
     
+    # 紀錄這次會話設定
     user_monitoring_sessions[sid] = {
+        'user_id': user_id,
         'start_time': time.time(),
         'start_time_iso': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'target_duration': duration_minutes,
         'user_id': data.get('user_id', 0) or session.get('userId', 0)
     }
-    print(f"[{sid}] 開始監測，預定時長: {duration_minutes} 分鐘")
 
+    print(f"[{sid}] 開始監測，預定時長: {duration_minutes} 分鐘")
 
 # === 手動停止 / 倒數時間到（主動結算）===
 @socketio.on('stop_monitoring')
@@ -395,6 +471,7 @@ def handle_stop_monitoring():
     """使用者點擊暫停或倒數時間到：直接結算 session"""
     global last_frame, posture_snapshots, last_tip_check, bad_posture_sustained
     sid = request.sid
+    user_id = session.get('user_id') or session.get('userId') or user_monitoring_sessions.get(sid, {}).get('user_id')
 
     with record_lock:
         if sum(posture_counts.values()) > 0:
@@ -410,6 +487,165 @@ def handle_stop_monitoring():
     bad_posture_sustained = False
     user_monitoring_sessions.pop(sid, None)
     print(f"[{sid}] 監測主動停止，session 已結算落庫。")
+
+@app.route('/renaissance')
+def posture_record():
+    # 1. 安全驗證：未登入強制跳轉
+    user_id = session.get('userId')
+    if not user_id:
+        return redirect(url_for('login'))
+
+    page = request.args.get("page", 1, type=int)
+    per_page = 10
+    offset = (page - 1) * per_page
+
+    # 2. 僅查詢個人資料
+    total_row = query_db(
+        "SELECT COUNT(*) FROM monitoring_sessions WHERE user_id = ?",
+        (user_id,),
+        one=True,
+    )
+    total_records = total_row[0] if total_row else 0
+    total_pages = (
+        math.ceil(total_records / per_page) if total_records > 0 else 1
+    )
+
+    db_records = query_db(
+        "SELECT * FROM monitoring_sessions WHERE user_id = ? ORDER BY start_time DESC LIMIT ? OFFSET ?",
+        (user_id, per_page, offset),
+    )
+
+    # 3. 資料格式化
+    history_data = []
+    for row in db_records:
+        row_dict = dict(row)
+        dominant = row_dict.get("dominant_posture", "未知")
+
+        # 狀態標籤樣式
+        if dominant == "端正坐姿":
+            badge = "badge-good"
+        elif any(k in dominant for k in ["烏龜", "低頭", "癱坐"]):
+            badge = "badge-danger"
+        else:
+            badge = "badge-warning"
+
+        # 處理圖片路徑
+        image_url = None
+        raw_path = row_dict.get("image_path")
+        if raw_path:
+            clean_path = raw_path.replace("\\", "/")
+            image_url = (
+                "/" + clean_path
+                if not clean_path.startswith("/")
+                else clean_path
+            )
+
+        # 個人備註 (不需顯示姓名/前綴)
+        note = f"烏龜:{row_dict.get('turtle_frames', 0)} 低頭:{row_dict.get('down_frames', 0)} 癱坐:{row_dict.get('slouch_frames', 0)}"
+
+        history_data.append({
+            "id": str(row_dict.get("session_id", ""))[:8],
+            "time": row_dict.get("start_time", ""),
+            "status": dominant,
+            "badge_class": badge,
+            "offset": f"{row_dict.get('avg_offset', 0):.0f} px",
+            "angle": f"{row_dict.get('avg_angle', 0):.0f}°",
+            "note": note,
+            "image_url": image_url,
+        })
+
+    return render_template(
+        "record.html",
+        records=history_data,
+        page=page,
+        total_pages=total_pages,
+        total_records=total_records,
+        per_page=per_page,
+    )
+
+@app.route("/overview")
+def posture_overview():
+    user_id = session.get("userId")
+    if not user_id:
+        return redirect(url_for("login"))
+
+    if session.get("role") != "admin":
+        abort(403)
+
+    # 2. 分頁參數
+    page = request.args.get("page", 1, type=int)
+    per_page = 10
+    offset = (page - 1) * per_page
+
+    # 3. 計算全表的總紀錄數與總頁數
+    total_row = query_db("SELECT COUNT(*) FROM monitoring_sessions", one=True)
+    total_records = total_row[0] if total_row else 0
+    total_pages = (
+        math.ceil(total_records / per_page) if total_records > 0 else 1
+    )
+
+    # 4. 撈取全體資料
+    db_records = query_db(
+        "SELECT * FROM monitoring_sessions ORDER BY start_time DESC LIMIT ? OFFSET ?",
+        (per_page, offset),
+    )
+
+    # 5. 資料格式化
+    history_data = []
+    for row in db_records:
+        row_dict = dict(row)
+
+        # 讀取資料庫已存好的主要姿勢
+        dominant = row_dict.get("dominant_posture", "未知")
+
+        # 狀態標籤樣式判斷 (與 /renaissance 保持一致)
+        if dominant == "端正坐姿":
+            badge = "badge-good"
+        elif any(k in dominant for k in ["烏龜", "低頭", "癱坐"]):
+            badge = "badge-danger"
+        else:
+            badge = "badge-warning"
+
+        # 處理圖片路徑
+        image_url = None
+        raw_path = row_dict.get("image_path")
+        if raw_path:
+            clean_path = raw_path.replace("\\", "/")
+            image_url = (
+                "/" + clean_path
+                if not clean_path.startswith("/")
+                else clean_path
+            )
+
+        curr_user_id = row_dict.get("user_id", "未知")
+
+        history_data.append({
+            "id": str(row_dict.get("session_id", ""))[:8] if row_dict.get("session_id") else row_dict.get("id"),
+            "user_id": curr_user_id,
+            "time": row_dict.get("start_time", ""),
+            "status": dominant,
+            "badge_class": badge,
+            "offset": f"{row_dict.get('avg_offset', 0):.0f} px",
+            "angle": f"{row_dict.get('avg_angle', 0):.0f}°",
+            # 備註包含使用者 ID 與各姿勢累積幀數
+            "note": (
+                f"[使用者 ID: {curr_user_id}] | "
+                f"烏龜:{row_dict.get('turtle_frames', 0)} "
+                f"低頭:{row_dict.get('down_frames', 0)} "
+                f"癱坐:{row_dict.get('slouch_frames', 0)}"
+            ),
+            "image_url": image_url,
+        })
+
+    # 6. 渲染至 overview.html
+    return render_template(
+        "overview.html",
+        records=history_data,
+        page=page,
+        total_pages=total_pages,
+        total_records=total_records,
+        per_page=per_page,
+    )
 
 #坐姿紀錄整理成圖表（個人數據）
 @app.route('/analysis')
@@ -462,6 +698,73 @@ def posture_analysis():
     
     return render_template('analysis.html', chart_data=chart_data)
 
+# 坐姿紀錄整理成圖表（個人數據專用）
+@app.route("/insights")
+def posture_insights():
+    # 1. 驗證登入狀態
+    user_id = session.get("userId") or session.get("user_id")
+    if not user_id:
+        return redirect(url_for("login"))
+
+    # 2. 僅查詢該登入使用者的最近 30 筆監測紀錄
+    db_records = query_db(
+        "SELECT * FROM monitoring_sessions WHERE user_id = ? ORDER BY start_time DESC LIMIT 30",
+        (user_id,),
+    )
+    # 反轉順序讓圖表時間軸由左至右（由舊到新）呈現
+    db_records = db_records[::-1] if db_records else []
+
+    labels = []
+    good_data = []
+    turtle_data = []
+    down_data = []
+    slouch_data = []
+
+    total_good = 0
+    total_turtle = 0
+    total_down = 0
+    total_slouch = 0
+
+    # 3. 解析各欄位並計算總和
+    for row in db_records:
+        # 時間標籤處理 (取出時與分，例如 '14:30')
+        start_time_val = str(row["start_time"]) if row["start_time"] else ""
+        time_str = (
+            start_time_val.split(" ")[1][:5]
+            if " " in start_time_val
+            else start_time_val
+        )
+        labels.append(time_str)
+
+        # 數值擷取 (避免 None 轉為 0)
+        g = row["good_frames"] or 0
+        t = row["turtle_frames"] or 0
+        d = row["down_frames"] or 0
+        s = row["slouch_frames"] or 0
+
+        good_data.append(g)
+        turtle_data.append(t)
+        down_data.append(d)
+        slouch_data.append(s)
+
+        # 圓餅圖/總計數據累加
+        total_good += g
+        total_turtle += t
+        total_down += d
+        total_slouch += s
+
+    # 4. 打包前端圖表所需格式
+    chart_data = {
+        "labels": labels,
+        "good": good_data,
+        "turtle": turtle_data,
+        "down": down_data,
+        "slouch": slouch_data,
+        "pie_totals": [total_good, total_turtle, total_down, total_slouch],
+    }
+
+    return render_template("insights.html", chart_data=chart_data)
+
 @app.route('/rank')
 def posture_rank():
     rows = query_db("""
@@ -497,61 +800,6 @@ def posture_rank():
     
     return render_template('rank.html', rankings=rank_data)
 
-@app.route('/login', methods=['POST'])
-def login():
-    # 1. 取得使用者在網頁表單輸入的帳號密碼
-    email = request.form.get('email')
-    password = request.form.get('password')
-    
-    # 2. 建立資料庫連線、3. 去資料庫尋找這個信箱
-    user = query_db("SELECT * FROM users WHERE email = ?", (email,), one=True)
-    
-    # 4. 密碼驗證 (將輸入的密碼做 MD5 處理後，與資料庫比對)
-    if user:
-        hashed_input_password = hashlib.md5(password.encode()).hexdigest()
-        
-        if user['password'] == hashed_input_password:
-            # 登入成功！將重要資訊寫入 Session (使用者的通行證)
-            session['loggedIn'] = True
-            session['userId'] = user['userId']
-            session['email'] = user['email']
-            session['firstName'] = user['firstName']
-            
-            # 根據 isAdmin 標籤，發給不同的權限
-            if user['isAdmin'] == 1:
-                session['role'] = 'admin'
-            else:
-                session['role'] = 'user'
-                
-            # 登入成功後，把使用者踢回首頁 (假設首頁的函數名稱為 index)
-            return redirect(url_for('index'))
-            
-    # 如果找不到帳號，或是密碼比對失敗
-    return "帳號或密碼錯誤，請回上一頁重新輸入"
-
-@app.route('/logout')
-def logout():
-    # 清空 session 裡的所有資料 (銷毀通行證)
-    session.clear()
-    
-    # 登出後，把使用者踢回首頁
-    return redirect(url_for('index'))
-
-class Config:
-    SCHEDULER_API_ENABLED = True
-
-app.config.from_object(Config())
-scheduler = APScheduler()
-
-# ================= 測試設定 =================
-SMTP_SERVER = 'smtp.gmail.com'         # 如果是 Gmail 不用改
-SMTP_PORT = 465                        # SSL 端口
-
-SENDER_EMAIL = 'startpan070@gmail.com'   # 寄件人 Gmail 帳號
-SENDER_PASSWORD = 'mqpp ahrw tbbb ypuu'  # Google 產生的應用程式專用密碼
-RECEIVER_EMAIL = 'startpan070@gmail.com' # 收件人 Email
-# ===================================================
-
 #取得一般使用者清單
 def get_all_users_from_db():
     """從資料庫讀取所有一般用戶的資料"""
@@ -559,7 +807,7 @@ def get_all_users_from_db():
 
     return query_db(query)
 
-# 批次發送用戶每週通知信
+# 批次發送用戶通知信
 def send_weekly_email_to_all_users():
     """核心功能：從資料庫抓取名單並逐一發送客製化信件"""
     print("【系統通知】開始執行每週批次發信任務...")
@@ -633,87 +881,10 @@ def test_send_all():
     else:
         return "<h3>發信失敗，請檢查終端機的錯誤訊息。</h3>"
 
-def getLoginDetails():
-    if 'email' not in session:
-        return False, ''
-    
-    user = query_db("SELECT userId, firstName FROM users WHERE email = ?", (session['email'],), one=True)
-    if not user:
-        return False, ''
-    
-    userId, firstName = user
-    return True, firstName
-
 @app.route("/aboutus")
 def aboutus():
     loggedIn, firstName = getLoginDetails()
     return render_template("aboutus.html", loggedIn=loggedIn, firstName=firstName)
-
-@app.route("/profileHome")
-def profileHome():
-    if 'email' not in session:
-        return redirect(url_for('index'))
-    loggedIn, firstName = getLoginDetails()
-    profileData = query_db("SELECT email, firstName, lastName, address1, phone, weight, height FROM users WHERE email = ?", (session['email'],), one=True)
-    return render_template("profileHome.html", profileData=profileData, loggedIn=loggedIn, firstName=firstName)
-
-@app.route("/editProfile")
-def editProfile():
-    if 'email' not in session:
-        return redirect(url_for('index'))
-    loggedIn, firstName = getLoginDetails()
-    profileData = query_db("SELECT email, firstName, lastName, address1, phone, weight, height FROM users WHERE email = ?", (session['email'],), one=True)
-    return render_template("editProfile.html", profileData=profileData, loggedIn=loggedIn, firstName=firstName)
-
-@app.route("/account/profile/changePassword", methods=["GET", "POST"])
-def changePassword():
-    if 'email' not in session:
-        return redirect(url_for('loginForm'))
-    if request.method == "POST":
-        oldPassword = request.form['oldpassword']
-        oldPassword = hashlib.md5(oldPassword.encode()).hexdigest()
-        newPassword = request.form['newpassword']
-        newPassword = hashlib.md5(newPassword.encode()).hexdigest()
-        user = query_db("SELECT userId, password FROM users WHERE email = ?", (session['email'],), one=True)
-        if user:
-            userId, password = user
-            if (password == oldPassword):
-                try:
-                    execute_db("UPDATE users SET password = ? WHERE userId = ?", (newPassword, userId))
-                    msg = "Changed successfully"
-                except Exception as e:
-                    msg = "Failed"
-                return render_template("changePassword.html", msg=msg)
-            else:
-                msg = "Wrong password"
-                return render_template("changePassword.html", msg=msg)
-        else:
-            msg = "User not found"
-            return render_template("changePassword.html", msg=msg)
-    else:
-        return render_template("changePassword.html")
-
-@app.route("/updateProfile", methods=["GET", "POST"])
-def updateProfile():
-    if request.method == 'POST':
-        email = request.form['email']
-        firstName = request.form['firstName']
-        lastName = request.form['lastName']
-        address1 = request.form['address1']
-        phone = request.form['phone']
-        weight = request.form['weight']
-        height = request.form['height']
-        try:
-            execute_db(
-                '''UPDATE users 
-                   SET firstName = ?, lastName = ?, address1 = ?, phone = ?, weight = ?, height = ? 
-                   WHERE email = ?''',
-                (firstName, lastName, address1, phone, weight, height, email)
-            )
-            msg = "Saved Successfully"
-        except Exception as e:
-            msg = "Error occured"
-        return redirect(url_for('editProfile'))
 
 if __name__ == '__main__':
     scheduler.init_app(app)

@@ -71,8 +71,17 @@ async function startMonitoring(selectedMinutes) {
         if (selectedMinutes > 0) {
             const durationMs = selectedMinutes * 60 * 1000;
             sessionTimeout = setTimeout(() => {
-                stopBtn.click(); // 自動觸發停止
-                alert(`⏱️ ${selectedMinutes} 分鐘監測時間已到！記得起身放鬆一下。`);
+                // 1. 播放提示音
+                playEndSound();
+
+                // 2. 停止監測並通知後端
+                stopBtn.click();
+                socket.emit('stop_monitoring');
+
+                // 3. 延遲彈出 alert
+                setTimeout(() => {
+                    alert(`⏱️ ${selectedMinutes} 分鐘監測時間已到！記得起身放鬆一下。`);
+                }, 500);
             }, durationMs);
         }
 
@@ -130,6 +139,41 @@ stopBtn.onclick = function() {
         sessionTimeout = null;
     }
 };
+
+// === 播放結束提示音（Web Audio API）===
+function playEndSound() {
+    try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const ctx = new AudioContext();
+
+        // 建立兩段提示音：先低頻後高頻（叮-咚）
+        const tones = [
+            { freq: 587.33, start: 0, end: 0.15 },    // D5
+            { freq: 880.00, start: 0.18, end: 0.45 }   // A5
+        ];
+
+        tones.forEach(tone => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(tone.freq, ctx.currentTime + tone.start);
+
+            // 淡入淡出避免爆音
+            gain.gain.setValueAtTime(0, ctx.currentTime + tone.start);
+            gain.gain.linearRampToValueAtTime(0.3, ctx.currentTime + tone.start + 0.03);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + tone.end);
+
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+
+            osc.start(ctx.currentTime + tone.start);
+            osc.stop(ctx.currentTime + tone.end);
+        });
+    } catch (e) {
+        console.warn("瀏覽器不支援或阻擋 Web Audio 播放", e);
+    }
+}
 
 // === 輔助函式：新增動態紀錄 ===
 function appendLogItem(title, content, borderColor, textClass) {

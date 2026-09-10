@@ -22,6 +22,31 @@ header, .navbar {
     color: #3b82f6 !important;
 }
 
+.dropdown-menu {
+    background-color: #1a1f29 !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
+    border-radius: 8px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5) !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.dropdown-item {
+    color: #e2e8f0 !important;
+    font-size: 0.95rem;
+    padding: 8px 16px;
+    transition: all 0.2s ease;
+}
+
+.dropdown-item:hover, .dropdown-item:focus {
+    background-color: #3b82f6 !important;
+    color: #ffffff !important;
+}
+
+.dropdown-divider {
+    border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
 .controls-wrapper {
     text-align: center;
     margin-bottom: 30px;

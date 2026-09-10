@@ -78,20 +78,21 @@
         </div>
         <div class="col-6 col-md-8 d-flex justify-content-end align-items-center pe-4">
             <div class="login-box me-4">
-            <!-- 修正 1：去 session 裡面檢查 loggedIn 狀態 -->
+            <!-- 去 session 裡面檢查 loggedIn 狀態 -->
             {% if not session.get('loggedIn') %}
                 <a href="/loginForm" class="member-link text-decoration-none">會員登入</a>
             {% else %}
                 <div class="dropdown">
                     <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
-                        <!-- 修正 2：去 session 裡面抓取名字 -->
+                        <!-- 去 session 裡面抓取名字 -->
                         Hello, {{ session.get('firstName') }}
                     </a>
                     <ul class="dropdown-menu shadow">
+                        <li><a class="dropdown-item" href="/profileHome">個人檔案</a></li>
                         <li><a class="dropdown-item" href="/renaissance">記錄管理</a></li>
-                        <li><a class="dropdown-item" href="#">個人檔案</a></li>
+                        <li><a class="dropdown-item" href="/insights">記錄分析</a></li>
                         <li><hr class="dropdown-divider"></li>
-                        <!-- 修正 3：綁定我們剛剛寫好的 /logout 路由 -->
+                        <!-- 綁定 /logout 路由 -->
                         <li><a class="dropdown-item" href="/logout">登出</a></li>
                     </ul>
                 </div>
@@ -125,10 +126,10 @@
                 <li class="nav-item"><a href="/ScanPage" class="nav-link">骨架偵測</a></li>
                 {% if session.role == 'admin' %}
                 <li class="nav-item">
-                    <a href="/renaissance" class="nav-link">姿勢紀錄</a>
+                    <a href="/overview" class="nav-link">數據總覽</a>
                 </li>
-                {% endif %}
                 <li class="nav-item"><a href="/analysis" class="nav-link active" style="color: #3b82f6 !important;">數據分析</a></li>
+                {% endif %}
                 <li class="nav-item"><a href="/rank" class="nav-link">高風險姿勢排行</a></li>
             </ul>
         </div>

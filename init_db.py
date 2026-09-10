@@ -87,12 +87,14 @@ def init_db():
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS posture_records (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
         good_count INTEGER NOT NULL DEFAULT 0,
         turtle_neck_count INTEGER NOT NULL DEFAULT 0,
         looking_down_count INTEGER NOT NULL DEFAULT 0,
         slouching_count INTEGER NOT NULL DEFAULT 0,
         timestamp TEXT NOT NULL,
-        image_path TEXT NULL
+        image_path TEXT NULL,
+        FOREIGN KEY (user_id) REFERENCES users (userId) ON DELETE CASCADE 
     )
     ''')
 
