@@ -49,7 +49,8 @@ posture_counts = {                  # 建立一個用來統計姿勢的字典
     "Good": 0,
     "TurtleNeck": 0,
     "LookingDown": 0,
-    "Slouching": 0
+    "Slouching": 0,
+    "LeaningForward": 0
 }
 
 # === 15 秒穩定判定機制 ===
@@ -246,11 +247,12 @@ def write_session_summary(sid, user_id=None):
         "good": round(posture_counts["Good"] / total * 100, 1) if total > 0 else 0,
         "turtle": round(posture_counts["TurtleNeck"] / total * 100, 1) if total > 0 else 0,
         "down": round(posture_counts["LookingDown"] / total * 100, 1) if total > 0 else 0,
-        "slouch": round(posture_counts["Slouching"] / total * 100, 1) if total > 0 else 0
+        "slouch": round(posture_counts["Slouching"] / total * 100, 1) if total > 0 else 0,
+        "lean": round(posture_counts["LeaningForward"] / total * 100, 1) if total > 0 else 0
     })
     
     dominant = max(posture_counts, key=posture_counts.get)
-    dominant_map = {"Good": "端正坐姿", "TurtleNeck": "烏龜頸", "LookingDown": "過度低頭", "Slouching": "癱坐"}
+    dominant_map = {"Good": "端正坐姿", "TurtleNeck": "烏龜頸", "LookingDown": "過度低頭", "Slouching": "癱坐", "LeaningForward": "前傾"}
     
     # 取最差姿勢的截圖
     bad_postures = {k: v for k, v in posture_counts.items() if k != "Good"}
@@ -267,12 +269,13 @@ def write_session_summary(sid, user_id=None):
     
     execute_db("""
         INSERT INTO monitoring_sessions 
-        (session_id, user_id, start_time, end_time, good_frames, turtle_frames, down_frames, slouch_frames, dominant_posture, image_path, posture_ratio, avg_angle, avg_offset)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (session_id, user_id, start_time, end_time, good_frames, turtle_frames, down_frames, slouch_frames, lean_frames, dominant_posture, image_path, posture_ratio, avg_angle, avg_offset)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         session_id, user_id, start_time, end_time,
         posture_counts["Good"], posture_counts["TurtleNeck"],
         posture_counts["LookingDown"], posture_counts["Slouching"],
+        posture_counts["LeaningForward"],
         dominant_map.get(dominant, dominant),
         image_path, posture_ratio, avg_angle, avg_offset
     ))
@@ -352,6 +355,8 @@ def handle_frame(data):
                         advice_message = "視線好像太低了！請試著抬起頭平視前方，讓頸椎休息一下吧。"
                     elif target == "Slouching":
                         advice_message = "身體是不是有點往後滑了呢？稍微把骨盆扶正，讓脊椎回到舒服的弧度喔。"
+                    elif target == "LeaningForward":
+                        advice_message = "您的身體正在前傾喔！請試著把背部往後靠，讓肩膀回到骨盆正上方。"
                     else:
                         advice_message = "系統偵測到您的坐姿需要調整囉，稍微伸展一下吧！"
                     
@@ -524,7 +529,7 @@ def posture_record():
         # 狀態標籤樣式
         if dominant == "端正坐姿":
             badge = "badge-good"
-        elif any(k in dominant for k in ["烏龜", "低頭", "癱坐"]):
+        elif any(k in dominant for k in ["烏龜", "低頭", "癱坐", "前傾"]):
             badge = "badge-danger"
         else:
             badge = "badge-warning"
@@ -540,8 +545,8 @@ def posture_record():
                 else clean_path
             )
 
-        # 個人備註 (不需顯示姓名/前綴)
-        note = f"烏龜:{row_dict.get('turtle_frames', 0)} 低頭:{row_dict.get('down_frames', 0)} 癱坐:{row_dict.get('slouch_frames', 0)}"
+        # 個人備註
+        note = f"烏龜:{row_dict.get('turtle_frames', 0)} 低頭:{row_dict.get('down_frames', 0)} 癱坐:{row_dict.get('slouch_frames', 0)} 前傾:{row_dict.get('lean_frames', 0)}"
 
         history_data.append({
             "id": str(row_dict.get("session_id", ""))[:8],
@@ -601,7 +606,7 @@ def posture_overview():
         # 狀態標籤樣式判斷 (與 /renaissance 保持一致)
         if dominant == "端正坐姿":
             badge = "badge-good"
-        elif any(k in dominant for k in ["烏龜", "低頭", "癱坐"]):
+        elif any(k in dominant for k in ["烏龜", "低頭", "癱坐", "前傾"]):
             badge = "badge-danger"
         else:
             badge = "badge-warning"
@@ -632,7 +637,8 @@ def posture_overview():
                 f"[使用者 ID: {curr_user_id}] | "
                 f"烏龜:{row_dict.get('turtle_frames', 0)} "
                 f"低頭:{row_dict.get('down_frames', 0)} "
-                f"癱坐:{row_dict.get('slouch_frames', 0)}"
+                f"癱坐:{row_dict.get('slouch_frames', 0)} "
+                f"前傾:{row_dict.get('lean_frames', 0)}"
             ),
             "image_url": image_url,
         })
@@ -667,11 +673,13 @@ def posture_analysis():
     turtle_data = []
     down_data = []
     slouch_data = []
+    lean_data = []
     
     total_good = 0
     total_turtle = 0
     total_down = 0
     total_slouch = 0
+    total_lean = 0
     
     for row in db_records:
         time_str = row['start_time'].split(' ')[1][:5] if ' ' in str(row['start_time']) else str(row['start_time'])
@@ -681,11 +689,13 @@ def posture_analysis():
         turtle_data.append(row['turtle_frames'])
         down_data.append(row['down_frames'])
         slouch_data.append(row['slouch_frames'])
+        lean_data.append(row.get('lean_frames', 0))
         
         total_good += row['good_frames']
         total_turtle += row['turtle_frames']
         total_down += row['down_frames']
         total_slouch += row['slouch_frames']
+        total_lean += row.get('lean_frames', 0)
         
     chart_data = {
         "labels": labels,
@@ -693,7 +703,8 @@ def posture_analysis():
         "turtle": turtle_data,
         "down": down_data,
         "slouch": slouch_data,
-        "pie_totals": [total_good, total_turtle, total_down, total_slouch]
+        "lean": lean_data,
+        "pie_totals": [total_good, total_turtle, total_down, total_slouch, total_lean]
     }
     
     return render_template('analysis.html', chart_data=chart_data)

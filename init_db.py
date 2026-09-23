@@ -109,6 +109,7 @@ def init_db():
         turtle_frames INTEGER NOT NULL DEFAULT 0,
         down_frames INTEGER NOT NULL DEFAULT 0,
         slouch_frames INTEGER NOT NULL DEFAULT 0,
+        lean_frames INTEGER NOT NULL DEFAULT 0,
         dominant_posture TEXT,
         image_path TEXT,
         posture_ratio TEXT,

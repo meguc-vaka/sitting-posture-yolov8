@@ -215,10 +215,19 @@
                     fill: true
                 },
                 {
-                    label: '癱坐前滑 (幀)',
+                    label: '癱坐 (幀)',
                     data: chartData.slouch,
                     borderColor: '#9b59b6', // 紫色
                     backgroundColor: 'rgba(155, 89, 182, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.4,
+                    fill: true
+                },
+                {
+                    label: '前傾 (幀)',
+                    data: chartData.lean,
+                    borderColor: '#e67e22', // 橙色
+                    backgroundColor: 'rgba(230, 126, 34, 0.1)',
                     borderWidth: 2,
                     tension: 0.4,
                     fill: true
@@ -256,18 +265,18 @@
     const pieChart = new Chart(pieCtx, {
         type: 'pie',
         data: {
-            labels: ['端正坐姿', '烏龜頸', '過度低頭', '癱坐前滑'],
+            labels: ['端正坐姿', '烏龜頸', '過度低頭', '癱坐', '前傾'],
             datasets: [{
-                // 讀取我們剛剛在後端加總好的 pie_totals 陣列
                 data: chartData.pie_totals,
                 backgroundColor: [
                     'rgba(46, 204, 113, 0.8)',  // 綠色
                     'rgba(231, 76, 60, 0.8)',   // 紅色
                     'rgba(243, 156, 18, 0.8)',  // 橘黃色
-                    'rgba(155, 89, 182, 0.8)'   // 紫色
+                    'rgba(155, 89, 182, 0.8)',  // 紫色
+                    'rgba(230, 126, 34, 0.8)'   // 橙色
                 ],
                 borderColor: [
-                    '#2ecc71', '#e74c3c', '#f39c12', '#9b59b6'
+                    '#2ecc71', '#e74c3c', '#f39c12', '#9b59b6', '#e67e22'
                 ],
                 borderWidth: 1
             }]
