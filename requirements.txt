@@ -1,7 +1,14 @@
+# --- Web & 排程 ---
 Flask==3.0.0
 Flask-SocketIO==5.3.6
 Flask-APScheduler
-eventlet==0.33.3
+simple-websocket==1.1.0
+
+# --- PyTorch CPU 核心 ---
+torch==2.4.1+cpu
+torchvision==0.19.1+cpu
+
+# --- AI 推論 & 影像處理 ---
 ultralytics==8.0.0
-numpy
-opencv-python-headless
+numpy==2.2.6
+opencv-python-headless==5.0.0.93

@@ -205,9 +205,7 @@
     /* --- 手機適配 --- */
     @media (max-width: 575.98px) {
       .nav { padding: 12px 20px; }
-
       .nav-toggle { display: flex; }
-
       .right-content {
         display: none;
         position: absolute;
@@ -220,35 +218,15 @@
         gap: 12px;
         box-shadow: 0 8px 20px rgba(0,0,0,0.3);
       }
-
       .right-content.show { display: flex; }
-
-      .right-content a {
-        display: block;
-        text-align: center;
-        padding: 10px 0;
-        border-radius: 8px;
-      }
-
-      .content-wrapper {
-        flex-direction: column;
-        padding: 20px 5%;
-        gap: 24px;
-      }
-
-      .Main {
-        padding: 30px 24px;
-        max-width: 100%;
-      }
-
+      .right-content a { display: block; text-align: center; padding: 10px 0; border-radius: 8px; }
+      .content-wrapper { flex-direction: column; padding: 20px 5%; gap: 24px; }
+      .Main { padding: 30px 24px; max-width: 100%; }
       .Main .title { font-size: 36px; }
       .Main .subtitle { font-size: 15px; }
-
       .buttons { flex-direction: column; gap: 12px; }
       .buttons a { font-size: 16px; padding: 12px 20px; }
-
       .features-container { max-width: 100%; }
-
       .feature-card { padding: 16px; }
       .feature-card:hover { transform: none; }
       .feature-text h3 { font-size: 16px; }
@@ -277,8 +255,9 @@
                         Hello, {{ session.get('firstName') }}
                     </a>
                     <ul class="dropdown-menu dropdown-menu-end shadow" style="background-color: rgba(59, 66, 122, 0.95);">
-                        <li><a class="dropdown-item" href="/renaissance">記錄管理</a></li>
                         <li><a class="dropdown-item" href="/profileHome">個人檔案</a></li>
+                        <li><a class="dropdown-item" href="/renaissance">記錄管理</a></li>
+                        <li><a class="dropdown-item" href="/renaissance">記錄分析</a></li>
                         <li><hr class="dropdown-divider"></li>
                         <li><a class="dropdown-item" href="/logout">登出</a></li>
                     </ul>
