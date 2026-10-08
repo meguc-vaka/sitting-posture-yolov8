@@ -82,21 +82,6 @@ def init_db():
         FOREIGN KEY (admin_id) REFERENCES users (userId) -- ★ 關聯已更新到 users 表
     )
     ''')
-    
-    # 4. 姿勢聚合紀錄表（3分鐘週期統計，保留 IF NOT EXISTS 不被清掉）
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS posture_records (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER NOT NULL,
-        good_count INTEGER NOT NULL DEFAULT 0,
-        turtle_neck_count INTEGER NOT NULL DEFAULT 0,
-        looking_down_count INTEGER NOT NULL DEFAULT 0,
-        slouching_count INTEGER NOT NULL DEFAULT 0,
-        timestamp TEXT NOT NULL,
-        image_path TEXT NULL,
-        FOREIGN KEY (user_id) REFERENCES users (userId) ON DELETE CASCADE 
-    )
-    ''')
 
     # 5. 監測會話彙總表（每次監測 session 一筆）
     cursor.execute('''
@@ -115,6 +100,42 @@ def init_db():
         posture_ratio TEXT,
         avg_angle REAL DEFAULT 0,
         avg_offset REAL DEFAULT 0,
+        FOREIGN KEY (user_id) REFERENCES users (userId)
+    )
+    ''')
+
+    # 6. 每週姿勢聚合數據表（紀錄每週標準化後的統計指標）
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS weekly_posture_summaries (
+        summary_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        week_key TEXT NOT NULL,                -- 格式例如: '2026-W37'
+        week_start_date TEXT NOT NULL,         -- 該週週一日期，如 '2026-09-14'
+        week_end_date TEXT NOT NULL,           -- 該週週日日期，如 '2026-09-20'
+        total_sessions INTEGER DEFAULT 0,
+        total_frames INTEGER DEFAULT 0,
+        turtle_rate REAL DEFAULT 0,            -- 烏龜頸佔比 (%)
+        down_rate REAL DEFAULT 0,              -- 低頭佔比 (%)
+        slouch_rate REAL DEFAULT 0,            -- 駝背佔比 (%)
+        status TEXT NOT NULL,                  -- 'EVALUATED' (已評估), 'DATA_TOO_SHORT' (數據不足)
+        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+        UNIQUE(user_id, week_key),
+        FOREIGN KEY (user_id) REFERENCES users (userId)
+    )
+    ''')
+
+# 7. 退步與警示紀錄表（專門存要推播或前端顯示的警示）
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS weekly_alerts (
+        alert_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        week_key TEXT NOT NULL,
+        alert_type TEXT NOT NULL,              -- 'REGRESSION' (退步), 'STAGNATION' (持續未改善)
+        posture_type TEXT NOT NULL,            -- 'turtle', 'down', 'slouch'
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        is_read INTEGER DEFAULT 0,             -- 前端使用者是否已點擊已讀 (0/1)
+        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
         FOREIGN KEY (user_id) REFERENCES users (userId)
     )
     ''')

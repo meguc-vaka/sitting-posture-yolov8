@@ -6,7 +6,7 @@ DB_PATH = 'database.db'
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     conn.execute('''
-        CREATE TABLE IF NOT EXISTS posture_records (
+        CREATE TABLE IF NOT EXISTS monitoring_sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             good_count INTEGER,
             turtle_neck_count INTEGER,
@@ -32,4 +32,10 @@ def execute_db(query, args=()):
     with sqlite3.connect(DB_PATH) as conn:
         cur = conn.cursor()
         cur.execute(query, args)
+        conn.commit()
+
+def executemany_db(query, seq_of_args):
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.executemany(query, seq_of_args)
         conn.commit()

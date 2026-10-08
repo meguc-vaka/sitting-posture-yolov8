@@ -12,7 +12,7 @@ from flask_socketio import SocketIO, emit
 from flask_apscheduler import APScheduler
 
 from controllers.controller import Controller
-from db import init_db, query_db, execute_db
+from db import init_db, query_db, execute_db, executemany_db
 from models.load_model import Model
 
 class Config:
@@ -78,6 +78,9 @@ posture_snapshots = {}      #暫存偵測時不同姿勢當下最新的一張畫
 posture_history = deque(
     maxlen=30                       # 代表這條輸送帶最多只記得過去 30 次的判定結果 (約 3 秒)
 ) 
+
+MIN_FRAMES_PER_WEEK = 1000       # 測試期可調低門檻方便觀察
+UNHEALTHY_THRESHOLD = 20.0       # 不良姿勢警戒線 (%)
 
 init_db()  # 啟動伺服器前自動檢查並建表
 print("正在初始化 AI 模型...")
@@ -825,10 +828,11 @@ def send_weekly_email_to_all_users():
     
     # 從資料庫獲取超過 7 天未更新 BMI 或從未更新過的使用者名單
     users = query_db("""
-        'SELECT * FROM users WHERE (updatedBMI < datetime('now', '-7 days') OR updatedBMI IS NULL OR updatedBMI = '')
+        SELECT * FROM users 
+        WHERE (email IS NOT NULL AND email != '' AND email LIKE '%@%')
+          AND (updatedBMI < datetime('now', '-7 days') OR updatedBMI IS NULL OR updatedBMI = '')
           AND (last_notified_at < datetime('now', '-7 days') OR last_notified_at IS NULL OR last_notified_at = '')
-    """
-    )
+    """)
     
     if not users:
         print("【系統通知】資料庫中沒有找到符合條件（超過7天未更新BMI）的使用者，終止發信。")
@@ -839,39 +843,48 @@ def send_weekly_email_to_all_users():
         with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
             
-            # 逐一為每個使用者客製化郵件內容
             for user in users:
+                # 跳過無效 email
                 email = user['email']
-                # 結合名與姓，若欄位為空則給預設稱呼
-                first_name = user['firstName'] if user['firstName'] else ""
-                last_name = user['lastName'] if user['lastName'] else "用戶"
-                full_name = f"{first_name}{last_name}"
+                if not email or "@" not in str(email):
+                    print(f"⚠️ 跳過無效信箱用戶 (ID: {user.get('userId', '未知')})")
+                    continue
+
+                try:
+                    first_name = user['firstName'] if user['firstName'] else ""
+                    last_name = user['lastName'] if user['lastName'] else "用戶"
+                    full_name = f"{first_name}{last_name}"
+                    
+                    message = MIMEMultipart('alternative')
+                    message['From'] = Header(f"官方系統通知 <{SENDER_EMAIL}>", 'utf-8')
+                    message['To'] = Header(str(email), 'utf-8')
+                    message['Subject'] = Header(f"【提醒】{full_name}，記得更新您的 BMI 資料以維持準確度", 'utf-8')
+                    
+                    content = f"""
+                    親愛的 {full_name} 您好：
+                    
+                    感謝您使用我們的網站！
+                    系統檢測到您已超過 7 天未更新 BMI 資料。為了使您的坐姿觀測與分析更準確，提醒您記得前往系統更新 BMI 數據。
+                    
+                    祝您有美好的一天！
+                    官方團隊 敬上
+                    """
+                    
+                    message.attach(MIMEText(content, 'plain', 'utf-8'))
+                    
+                    # 發送郵件
+                    server.sendmail(SENDER_EMAIL, [email], message.as_string())
+                    print(f"成功發送給: {full_name} ({email})")
+
+                    # 3. 建議：發送成功後更新 last_notified_at，避免重複被寄信
+                    # execute_db("UPDATE users SET last_notified_at = datetime('now') WHERE userId = ?", (user['userId'],))
+
+                except Exception as user_err:
+                    # 個別使用者寄信失敗只印出 log，不中斷其他人寄信
+                    print(f"❌ 發送給 {email} 失敗: {user_err}")
+                    continue
                 
-                # 建立支援多元格式的郵件容器
-                message = MIMEMultipart('alternative')
-                message['From'] = Header(f"官方系統通知 <{SENDER_EMAIL}>", 'utf-8')
-                message['To'] = Header(email, 'utf-8')
-                message['Subject'] = Header(f"【提醒】{full_name}，記得更新您的 BMI 資料以維持準確度", 'utf-8')
-                
-                # 給該使用者的客製化內文
-                content = f"""
-                親愛的 {full_name} 您好：
-                
-                感謝您使用我們的網站！
-                系統檢測到您已超過 7 天未更新 BMI 資料。為了使您的坐姿觀測與分析更準確，提醒您記得前往系統更新 BMI 數據。
-                
-                祝您有美好的一天！
-                官方團隊 敬上
-                """
-                
-                part_text = MIMEText(content, 'plain', 'utf-8')
-                message.attach(part_text)
-                
-                # 發送郵件
-                server.sendmail(SENDER_EMAIL, [email], message.as_string())
-                print(f"成功發送給: {full_name} ({email})")
-                
-        print("【系統通知】所有符合條件使用者的郵件均已發送完畢！")
+        print("【系統通知】所有符合條件使用者的郵件均已處理完畢！")
         return True
     except Exception as e:
         print(f"【系統錯誤】批次發信過程中發生錯誤: {e}")
@@ -896,6 +909,253 @@ def test_send_all():
 def aboutus():
     loggedIn, firstName = getLoginDetails()
     return render_template("aboutus.html", loggedIn=loggedIn, firstName=firstName)
+
+TEST_USER_ID = 1
+
+def send_single_report_email(receiver_email, subject, html_body):
+    """透過 Gmail SSL 發送單封郵件"""
+    message = MIMEMultipart("alternative")
+    message["Subject"] = Header(subject, 'utf-8')
+    message["From"] = Header(f"官方坐姿健康團隊 <{SENDER_EMAIL}>", 'utf-8')
+    message["To"] = Header(receiver_email, 'utf-8')
+    message.attach(MIMEText(html_body, "html", "utf-8"))
+
+    try:
+        with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
+            server.login(SENDER_EMAIL, SENDER_PASSWORD)
+            server.sendmail(SENDER_EMAIL, [receiver_email], message.as_string())
+        print(f"✅ [發信成功] 週報已寄達: {receiver_email}")
+        return True
+    except Exception as e:
+        print(f"❌ [發信失敗] {receiver_email}: {e}")
+        return False
+
+def execute_user_report_pipeline(user_id, receiver_email, user_name="用戶"):
+    """【正式通用流程】為特定 user_id 執行運算、落盤資料庫並寄發週報至其專屬 Email"""
+    # 1. 計算該使用者的週指標與警示（函式內會自動寫入 weekly_posture_summaries 與 weekly_alerts）
+    result = evaluate_user_posture(user_id)
+
+    # 查無紀錄或週數不足時略過寄信
+    if result.get("status") in ["EMPTY", "BUILDING"]:
+        print(f"ℹ️ user_id={user_id} 數據不足或無紀錄，略過本週發信。")
+        return False
+
+    # 2. 判斷信件主旨（依警示等級動態切換）
+    subject = f"【坐姿週報】{user_name}，您的上週坐姿健康摘要已出爐"
+    if result.get("alerts"):
+        for a in result["alerts"]:
+            if a['type'] == 'REGRESSION':
+                subject = f"⚠️【特別警示】{user_name}，{a['title']} - 請檢視您的上週坐姿"
+                break
+            elif a['type'] == 'IMPROVEMENT':
+                subject = f"🎉【良好進展】{user_name}，{a['title']} - 上週坐姿健康摘要"
+
+    # 3. 渲染 templates/report.html 模板
+    html_content = render_template('report.html', result=result, user_name=user_name)
+
+    # 4. 寄出信件至對應信箱
+    return send_single_report_email(receiver_email, subject, html_content)
+
+def execute_test_user_report_pipeline():
+    """【測試專用】專門為 user_id=1 執行運算並寄送週報至固定測試信箱 (Demo 用)"""
+    return execute_user_report_pipeline(
+        user_id=TEST_USER_ID,
+        receiver_email=RECEIVER_EMAIL,
+        user_name="測試使用者"
+    )
+
+@scheduler.task('cron', id='weekly_test_posture_job', day_of_week='mon', hour=0, minute=0)
+def scheduled_weekly_posture_job():
+    """【正式每週一排程】00:00 觸發：從資料庫遍歷使用者並寄信"""
+    with app.app_context():
+        print("🕒 每週一 00:00 排程觸發：開始執行全體使用者坐姿週報運算與發信...")
+        
+        # 撈取有有效信箱且願意接收週報的使用者名單
+        users = query_db("""
+            SELECT userId, email, firstName, lastName 
+            FROM users 
+            WHERE (email IS NOT NULL AND email != '' AND email LIKE '%@%')
+        """)
+        
+        if not users:
+            print("【系統通知】資料庫中無具備有效信箱的使用者，排程結束。")
+            return
+
+        for user in users:
+            uid = user['userId']
+            email = user['email']
+            first_name = user['firstName'] if user['firstName'] else ""
+            last_name = user['lastName'] if user['lastName'] else "用戶"
+            user_name = f"{first_name}{last_name}".strip() or "用戶"
+            
+            try:
+                execute_user_report_pipeline(uid, email, user_name)
+            except Exception as e:
+                print(f"❌ 處理 user_id={uid} ({email}) 時發生例外錯誤: {e}")
+                continue
+
+@app.route('/test-send-weekly-mail')
+def test_send_weekly_mail():
+    """供手動測試 Demo 使用的路由（寫死寄給 RECEIVER_EMAIL）"""
+    success = execute_test_user_report_pipeline()
+    if success:
+        return f"<h3>✅ 測試週報發送成功！</h3><p>已為 <strong>user_id={TEST_USER_ID}</strong> 產生報表，並寄送至 <strong>{RECEIVER_EMAIL}</strong>，請至收件匣查看！</p>"
+    else:
+        return f"<h3>❌ 測試週報發送失敗</h3><p>請檢查後台終端機的錯誤日誌。</p>", 500
+
+def evaluate_user_posture(user_id):
+    """取得最近 4 週數據、執行退步/未改善評估，並將分析結果自動寫入資料庫"""
+    # 撈取該使用者最近 28 天的每週統計
+    sql = '''
+        SELECT 
+            strftime('%Y-W%W', start_time) AS week_key,
+            min(date(start_time)) AS week_start,
+            max(date(start_time)) AS week_end,
+            COUNT(session_id) AS total_sessions,
+            SUM(good_frames + turtle_frames + down_frames + slouch_frames) AS total_f,
+            SUM(turtle_frames) AS turtle_f,
+            SUM(down_frames) AS down_f,
+            SUM(slouch_frames) AS slouch_f
+        FROM monitoring_sessions
+        WHERE user_id = ?
+        GROUP BY week_key
+        ORDER BY week_key DESC
+        LIMIT 4
+    '''
+    rows = query_db(sql, (user_id,))
+    if not rows:
+        return {"status": "EMPTY", "message": "目前查無任何歷史監測紀錄。", "weeks": [], "alerts": []}
+
+    # 轉為由舊到新排序 (W_3 -> W_2 -> W_1 -> W_current)
+    weeks = list(reversed(rows))
+    
+    formatted_weeks = []
+    for w in weeks:
+        tot = w['total_f'] or 1
+        formatted_weeks.append({
+            "week_key": w['week_key'],
+            "week_start": w['week_start'],
+            "week_end": w['week_end'],
+            "total_sessions": w['total_sessions'],
+            "total_f": tot,
+            "turtle_rate": round((w['turtle_f'] or 0) * 100.0 / tot, 1),
+            "down_rate": round((w['down_f'] or 0) * 100.0 / tot, 1),
+            "slouch_rate": round((w['slouch_f'] or 0) * 100.0 / tot, 1)
+        })
+
+    current_week = formatted_weeks[-1]
+    history_weeks = formatted_weeks[:-1]
+
+    # =========================================================================
+    # 【位置 1】：自動寫入 weekly_posture_summaries 表（記錄當週聚合統計）
+    # =========================================================================
+    summary_status = "EVALUATED" if current_week['total_f'] >= 1000 else "INSUFFICIENT_DATA"
+    execute_db('''
+        INSERT OR REPLACE INTO weekly_posture_summaries 
+        (user_id, week_key, week_start_date, week_end_date, total_sessions, total_frames, turtle_rate, down_rate, slouch_rate, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        user_id, 
+        current_week['week_key'], 
+        current_week['week_start'], 
+        current_week['week_end'], 
+        current_week['total_sessions'], 
+        current_week['total_f'], 
+        current_week['turtle_rate'], 
+        current_week['down_rate'], 
+        current_week['slouch_rate'], 
+        summary_status
+    ))
+
+    alerts = []
+    if len(formatted_weeks) < 2:
+        return {
+            "status": "BUILDING",
+            "message": "歷史記錄僅有 1 週，尚需至少累積第 2 週才能進行趨勢比對。",
+            "weeks": formatted_weeks,
+            "alerts": []
+        }
+
+    # 比對三項主要錯誤姿勢
+    postures = [
+        ("turtle_rate", "turtle", "烏龜頸"),
+        ("down_rate", "down", "低頭姿勢"),
+        ("slouch_rate", "slouch", "彎腰駝背")
+    ]
+
+    for p_key, p_type, p_name in postures:
+        cur_val = current_week[p_key]
+        hist_vals = [w[p_key] for w in history_weeks]
+        mean = float(np.mean(hist_vals))
+        std = float(np.std(hist_vals, ddof=1)) if len(hist_vals) > 1 else 1.0
+
+        # 1. 顯著退步判定
+        if cur_val > (mean + 1.5 * std) and (cur_val - mean) >= 3.0:
+            diff = round(cur_val - mean, 1)
+            alerts.append({
+                "type": "REGRESSION",
+                "posture_type": p_type,
+                "level": "danger",
+                "title": f"⚠️ {p_name}頻率顯著退步",
+                "content": f"本週 {p_name} 比例達 {cur_val}%，比過往平均值（{round(mean, 1)}%）增加了 {diff}%。"
+            })
+        # 2. 顯著改善判定
+        elif cur_val < (mean - 1.5 * std) and (mean - cur_val) >= 5.0:
+            diff = round(mean - cur_val, 1)
+            alerts.append({
+                "type": "IMPROVEMENT",
+                "posture_type": p_type,
+                "level": "success",
+                "title": f"🎉 {p_name}習慣顯著改善！",
+                "content": f"本週 {p_name} 比例大幅降至 {cur_val}%，比過往平均值（{round(mean, 1)}%）減少了 {diff}%，請繼續保持！"
+            })
+        # 3. 持續未改善判定
+        elif all(v >= 20.0 for v in hist_vals + [cur_val]):
+            improvement = (mean - cur_val) / mean if mean > 0 else 0
+            if improvement < 0.05:
+                alerts.append({
+                    "type": "STAGNATION",
+                    "posture_type": p_type,
+                    "level": "warning",
+                    "title": f"⚡ {p_name}持續未見改善",
+                    "content": f"近幾週 {p_name} 持續偏高（平均 {round(mean, 1)}%），且本週仍未有明顯好轉跡息。"
+                })
+
+    # =========================================================================
+    # 【位置 2】：自動寫入 weekly_alerts 表（先清空當週舊紀錄，再寫入新警示）
+    # =========================================================================
+    execute_db(
+        "DELETE FROM weekly_alerts WHERE user_id = ? AND week_key = ?",
+        (user_id, current_week['week_key'])
+    )
+
+    for a in alerts:
+        execute_db('''
+            INSERT INTO weekly_alerts (user_id, week_key, alert_type, posture_type, title, message, is_read)
+            VALUES (?, ?, ?, ?, ?, ?, 0)
+        ''', (
+            user_id, 
+            current_week['week_key'], 
+            a['type'], 
+            a['posture_type'], 
+            a['title'], 
+            a['content']
+        ))
+
+    return {
+        "status": "SUCCESS",
+        "message": "分析完成",
+        "weeks": formatted_weeks,
+        "alerts": alerts
+    }
+
+@app.route('/posture-report')
+def posture_report():
+    user_id = request.args.get('user_id', default=1, type=int)
+    current_user_id = session.get('user_id', 1)
+    result = evaluate_user_posture(current_user_id)
+    
+    return render_template('posture_report.html', result=result, user_id=user_id)
 
 if __name__ == '__main__':
     scheduler.init_app(app)
